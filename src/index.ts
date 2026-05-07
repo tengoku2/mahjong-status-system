@@ -1,5 +1,4 @@
 import "dotenv/config";
-import { createServer } from "node:http";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -15,6 +14,7 @@ import {
   type GuildMember,
   type ModalSubmitInteraction
 } from "discord.js";
+import { createApiServer } from "./external-api.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
 import { formatPeriodLabel } from "./periods.js";
@@ -41,22 +41,7 @@ const client = new Client({
 });
 
 const port = Number(process.env.PORT ?? 8000);
-const healthServer = createServer((request, response) => {
-  if (request.url === "/health") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify({
-        ok: true,
-        discordReady: client.isReady(),
-        uptime: process.uptime()
-      })
-    );
-    return;
-  }
-
-  response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-  response.end("Not Found");
-});
+const healthServer = createApiServer(client);
 
 const pendingRecordOptions = new Map<
   string,

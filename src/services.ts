@@ -4,6 +4,11 @@ import { calendarStart, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
 
+export interface ExternalMatchIdentity {
+  externalSource: string;
+  externalMatchId: string;
+}
+
 export async function ensureGuildAndUsers(guildId: string, userIds: string[], tx: Prisma.TransactionClient = prisma) {
   await tx.guild.upsert({
     where: { guildId },
@@ -64,6 +69,87 @@ export async function createMatch(
         }
       }
     });
+  });
+}
+
+export async function createExternalMatch(
+  guildId: string,
+  type: MahjongType,
+  players: PlayerInput[],
+  tournamentName: string | undefined,
+  playedAt: Date | undefined,
+  identity: ExternalMatchIdentity
+) {
+  const calculated = calculateResults(type, players);
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.externalMatch.findUnique({
+      where: {
+        externalSource_externalMatchId: {
+          externalSource: identity.externalSource,
+          externalMatchId: identity.externalMatchId
+        }
+      },
+      include: {
+        match: {
+          include: {
+            results: {
+              orderBy: {
+                rank: "asc"
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (existing) {
+      return {
+        duplicate: true,
+        match: existing.match
+      };
+    }
+
+    await ensureGuildAndUsers(guildId, calculated.map((player) => player.userId), tx);
+
+    const match = await tx.match.create({
+      data: {
+        guildId,
+        type,
+        tournamentName: normalizedTournamentName,
+        playedAt,
+        results: {
+          create: calculated.map((result) => ({
+            userId: result.userId,
+            rank: result.rank,
+            rawScore: result.rawScore,
+            point: result.point
+          }))
+        }
+      },
+      include: {
+        results: {
+          orderBy: {
+            rank: "asc"
+          }
+        }
+      }
+    });
+
+    await tx.externalMatch.create({
+      data: {
+        externalSource: identity.externalSource,
+        externalMatchId: identity.externalMatchId,
+        guildId,
+        matchId: match.matchId
+      }
+    });
+
+    return {
+      duplicate: false,
+      match
+    };
   });
 }
 

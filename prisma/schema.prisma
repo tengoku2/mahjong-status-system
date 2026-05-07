@@ -47,6 +47,7 @@ model Match {
   createdAt      DateTime @default(now()) @map("created_at")
   guild          Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   results        Result[]
+  externalMatch  ExternalMatch?
 
   @@index([guildId, type, playedAt])
   @@index([guildId, type, tournamentName, playedAt])
@@ -66,4 +67,17 @@ model Result {
   @@unique([matchId, rank])
   @@index([userId])
   @@map("results")
+}
+
+model ExternalMatch {
+  externalSource  String   @map("external_source")
+  externalMatchId String   @map("external_match_id")
+  guildId         String   @map("guild_id")
+  matchId         String   @unique @map("match_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  match           Match    @relation(fields: [matchId], references: [matchId], onDelete: Cascade)
+
+  @@id([externalSource, externalMatchId])
+  @@index([guildId])
+  @@map("external_matches")
 }

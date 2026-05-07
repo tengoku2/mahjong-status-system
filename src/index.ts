@@ -349,7 +349,7 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
     return name;
   };
   const matchText = (playedAt: Date) => formatDate(playedAt);
-  const empty = "対象データがありません";
+  const empty = "記録なし";
 
   const highestRawScore = await summarizeRecordList<MatchRecord>(
     currentRecords.highestRawScore,
@@ -385,19 +385,19 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   const bestAverageRank = await summarizeRecordList<PlayerRecord>(
     currentRecords.bestAverageRank,
     async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(2)}位`,
-    `${currentRecords.qualifiedMinGames}戦以上の対象者がいません`,
+    `${currentRecords.qualifiedMinGames}戦以上の記録なし`,
     "名"
   );
   const topStreak = await summarizeRecordList<PlayerRecord>(
     currentRecords.longestTopStreak,
     async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
-    empty,
+    "2連続以上の記録なし",
     "名"
   );
   const noLastStreak = await summarizeRecordList<PlayerRecord>(
     currentRecords.longestNoLastStreak,
     async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
-    empty,
+    "2連続以上の記録なし",
     "名"
   );
 

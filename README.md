@@ -19,7 +19,7 @@ scripts\with-node22.cmd run build
 
 ```bat
 scripts\with-node22.cmd install
-scripts\setup-env.cmd 1501647550279843972 1479381180146257950,1499090620373929984
+scripts\setup-env.cmd YOUR_DISCORD_CLIENT_ID GUILD_ID_1,GUILD_ID_2
 scripts\with-node22.cmd run prisma:generate
 scripts\with-node22.cmd run db:deploy
 scripts\with-node22.cmd run register
@@ -148,7 +148,7 @@ KoyebではDockerfileを使ってWeb Serviceとしてデプロイします。Bot
 DATABASE_URL=postgres://...
 DISCORD_TOKEN=...
 DISCORD_CLIENT_ID=...
-DISCORD_GUILD_IDS=1479381180146257950,1499090620373929984
+DISCORD_GUILD_IDS=GUILD_ID_1,GUILD_ID_2
 DEVELOPER_USER_IDS=...
 PORT=8000
 ```

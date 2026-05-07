@@ -121,7 +121,7 @@ async function summarizeRecordList<T>(
     return empty;
   }
 
-  const visible = await Promise.all(entries.slice(0, 5).map(formatEntry));
+  const visible = await Promise.all(entries.slice(0, 3).map(formatEntry));
   const hidden = entries.length - visible.length;
   return hidden > 0 ? `${visible.join("\n")}\n他${hidden}${hiddenUnit}` : visible.join("\n");
 }

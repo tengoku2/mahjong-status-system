@@ -79,4 +79,15 @@ describe("records", () => {
       { userId: "b", value: 1 }
     ]);
   });
+
+  it("does not award single-game streaks", () => {
+    const records = calculateRecords("3p", [
+      result("m1", 1, "a", 1, 50000, 30),
+      result("m1", 1, "b", 2, 35000, 0),
+      result("m1", 1, "c", 3, 20000, -30)
+    ]);
+
+    expect(records.longestTopStreak).toEqual([]);
+    expect(records.longestNoLastStreak).toEqual([]);
+  });
 });

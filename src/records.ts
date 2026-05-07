@@ -192,7 +192,7 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
     largestPointWinMargin: sortMatchRecords(selectBestRecords(pointWinMargins)),
     mostTops: sortPlayerRecords(selectBestRecords(topRecords)),
     bestAverageRank: sortPlayerRecords(selectBestRecords(averageRankRecords, true)),
-    longestTopStreak: sortPlayerRecords(selectBestRecords(topStreakRecords)),
-    longestNoLastStreak: sortPlayerRecords(selectBestRecords(noLastStreakRecords))
+    longestTopStreak: sortPlayerRecords(selectBestRecords(topStreakRecords.filter((record) => record.value >= 2))),
+    longestNoLastStreak: sortPlayerRecords(selectBestRecords(noLastStreakRecords.filter((record) => record.value >= 2)))
   };
 }

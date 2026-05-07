@@ -9,6 +9,11 @@ export interface ExternalMatchIdentity {
   externalMatchId: string;
 }
 
+const transactionOptions = {
+  maxWait: 10_000,
+  timeout: 20_000
+};
+
 export async function ensureGuildAndUsers(guildId: string, userIds: string[], tx: Prisma.TransactionClient = prisma) {
   await tx.guild.upsert({
     where: { guildId },
@@ -69,7 +74,7 @@ export async function createMatch(
         }
       }
     });
-  });
+  }, transactionOptions);
 }
 
 export async function createExternalMatch(
@@ -150,7 +155,7 @@ export async function createExternalMatch(
       duplicate: false,
       match
     };
-  });
+  }, transactionOptions);
 }
 
 export function normalizeTournamentName(value?: string | null): string | undefined {

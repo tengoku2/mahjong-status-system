@@ -85,6 +85,9 @@ export const mahjongCommand = new SlashCommandBuilder()
     addTournamentOption(addPeriodOption(addTypeOption(command.setName("ranking").setDescription("ランキングを表示します"))))
   )
   .addSubcommand((command) =>
+    addTournamentOption(addPeriodOption(addTypeOption(command.setName("records").setDescription("レコードを表示します"))))
+  )
+  .addSubcommand((command) =>
     command
       .setName("delete")
       .setDescription("指定した対局を削除します")

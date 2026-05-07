@@ -20,7 +20,7 @@ import { recordModal } from "./modals.js";
 import { formatPeriodLabel } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { expectedPlayerCount } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking } from "./services.js";
+import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking, records } from "./services.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -311,6 +311,85 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   });
 }
 
+async function handleRecords(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply();
+  const guildId = requireGuildId(interaction);
+  const type = typeOption(interaction);
+  const period = rankingPeriodOption(interaction);
+  const tournamentName = tournamentOption(interaction);
+  const currentRecords = await records(guildId, type, period, tournamentName);
+  const nameCache = new Map<string, string>();
+  const nameFor = async (userId: string) => {
+    const cached = nameCache.get(userId);
+    if (cached) {
+      return cached;
+    }
+    const name = await displayName(guildId, await fetchMember(interaction, userId), userId);
+    nameCache.set(userId, name);
+    return name;
+  };
+  const matchText = (matchId: string, playedAt: Date) => `Match \`${matchId.slice(0, 8)}\` / ${formatDate(playedAt)}`;
+  const empty = "対象データがありません";
+
+  const highestRawScore = currentRecords.highestRawScore
+    ? `${await nameFor(currentRecords.highestRawScore.userId)} ${currentRecords.highestRawScore.value}点\n${matchText(
+        currentRecords.highestRawScore.matchId,
+        currentRecords.highestRawScore.playedAt
+      )}`
+    : empty;
+  const highestPoint = currentRecords.highestPoint
+    ? `${await nameFor(currentRecords.highestPoint.userId)} ${formatPoint(currentRecords.highestPoint.value)}pt\n${matchText(
+        currentRecords.highestPoint.matchId,
+        currentRecords.highestPoint.playedAt
+      )}`
+    : empty;
+  const rawScoreMargin = currentRecords.largestRawScoreWinMargin
+    ? `${await nameFor(currentRecords.largestRawScoreWinMargin.userId)} +${currentRecords.largestRawScoreWinMargin.value}点 vs ${await nameFor(
+        currentRecords.largestRawScoreWinMargin.secondUserId
+      )}\n${matchText(currentRecords.largestRawScoreWinMargin.matchId, currentRecords.largestRawScoreWinMargin.playedAt)}`
+    : empty;
+  const pointMargin = currentRecords.largestPointWinMargin
+    ? `${await nameFor(currentRecords.largestPointWinMargin.userId)} +${formatPoint(
+        currentRecords.largestPointWinMargin.value
+      )}pt vs ${await nameFor(currentRecords.largestPointWinMargin.secondUserId)}\n${matchText(
+        currentRecords.largestPointWinMargin.matchId,
+        currentRecords.largestPointWinMargin.playedAt
+      )}`
+    : empty;
+  const mostTops = currentRecords.mostTops ? `${await nameFor(currentRecords.mostTops.userId)} ${currentRecords.mostTops.value}回` : empty;
+  const bestAverageRank = currentRecords.bestAverageRank
+    ? `${await nameFor(currentRecords.bestAverageRank.userId)} ${currentRecords.bestAverageRank.value.toFixed(2)}位`
+    : `${currentRecords.qualifiedMinGames}戦以上の対象者がいません`;
+  const topStreak = currentRecords.longestTopStreak
+    ? `${await nameFor(currentRecords.longestTopStreak.userId)} ${currentRecords.longestTopStreak.value}連続`
+    : empty;
+  const noLastStreak = currentRecords.longestNoLastStreak
+    ? `${await nameFor(currentRecords.longestNoLastStreak.userId)} ${currentRecords.longestNoLastStreak.value}連続`
+    : empty;
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("レコード")
+        .setDescription(
+          `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n対象対局数: ${
+            currentRecords.totalMatches
+          }`
+        )
+        .addFields(
+          { name: "最高スコア", value: highestRawScore, inline: false },
+          { name: "最高pt", value: highestPoint, inline: false },
+          { name: "最大トップ差", value: rawScoreMargin, inline: false },
+          { name: "最大pt差", value: pointMargin, inline: false },
+          { name: "最多トップ", value: mostTops, inline: true },
+          { name: `最高平均順位 (${currentRecords.qualifiedMinGames}戦以上)`, value: bestAverageRank, inline: true },
+          { name: "連続トップ", value: topStreak, inline: true },
+          { name: "連続ラス回避", value: noLastStreak, inline: true }
+        )
+    ]
+  });
+}
+
 function confirmRow(action: "delete" | "undo", matchId: string) {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -469,6 +548,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleHistory(interaction);
   } else if (subcommand === "ranking") {
     await handleRanking(interaction);
+  } else if (subcommand === "records") {
+    await handleRecords(interaction);
   } else if (subcommand === "delete") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {

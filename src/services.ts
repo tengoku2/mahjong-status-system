@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { calculateResults } from "./scoring.js";
+import { calculateRecords } from "./records.js";
 import { calendarStart, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
@@ -281,6 +282,11 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
       averagePoint: entry.totalPoint / entry.games
     }))
     .sort((a, b) => b.totalPoint - a.totalPoint);
+}
+
+export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
+  const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
+  return calculateRecords(type, results);
 }
 
 export async function deleteMatch(guildId: string, matchId: string) {

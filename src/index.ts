@@ -21,6 +21,7 @@ import { formatPeriodLabel } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { expectedPlayerCount } from "./scoring.js";
 import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking, records } from "./services.js";
+import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -108,6 +109,21 @@ function formatDate(date: Date): string {
 
 function typeLabel(type: MahjongType): string {
   return type === "4p" ? "4人半荘" : "3人半荘";
+}
+
+async function summarizeRecordList<T>(
+  entries: T[],
+  formatEntry: (entry: T) => Promise<string>,
+  empty: string,
+  hiddenUnit: "名" | "件"
+): Promise<string> {
+  if (entries.length === 0) {
+    return empty;
+  }
+
+  const visible = await Promise.all(entries.slice(0, 5).map(formatEntry));
+  const hidden = entries.length - visible.length;
+  return hidden > 0 ? `${visible.join("\n")}\n他${hidden}${hiddenUnit}` : visible.join("\n");
 }
 
 async function fetchMember(interaction: { guild: ChatInputCommandInteraction["guild"] }, userId: string): Promise<GuildMember | null> {
@@ -335,38 +351,55 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   const matchText = (playedAt: Date) => formatDate(playedAt);
   const empty = "対象データがありません";
 
-  const highestRawScore = currentRecords.highestRawScore
-    ? `${await nameFor(currentRecords.highestRawScore.userId)} ${currentRecords.highestRawScore.value}点\n${matchText(
-        currentRecords.highestRawScore.playedAt
-      )}`
-    : empty;
-  const highestPoint = currentRecords.highestPoint
-    ? `${await nameFor(currentRecords.highestPoint.userId)} ${formatPoint(currentRecords.highestPoint.value)}pt\n${matchText(
-        currentRecords.highestPoint.playedAt
-      )}`
-    : empty;
-  const rawScoreMargin = currentRecords.largestRawScoreWinMargin
-    ? `${await nameFor(currentRecords.largestRawScoreWinMargin.userId)} +${currentRecords.largestRawScoreWinMargin.value}点 vs ${await nameFor(
-        currentRecords.largestRawScoreWinMargin.secondUserId
-      )}\n${matchText(currentRecords.largestRawScoreWinMargin.playedAt)}`
-    : empty;
-  const pointMargin = currentRecords.largestPointWinMargin
-    ? `${await nameFor(currentRecords.largestPointWinMargin.userId)} +${formatPoint(
-        currentRecords.largestPointWinMargin.value
-      )}pt vs ${await nameFor(currentRecords.largestPointWinMargin.secondUserId)}\n${matchText(
-        currentRecords.largestPointWinMargin.playedAt
-      )}`
-    : empty;
-  const mostTops = currentRecords.mostTops ? `${await nameFor(currentRecords.mostTops.userId)} ${currentRecords.mostTops.value}回` : empty;
-  const bestAverageRank = currentRecords.bestAverageRank
-    ? `${await nameFor(currentRecords.bestAverageRank.userId)} ${currentRecords.bestAverageRank.value.toFixed(2)}位`
-    : `${currentRecords.qualifiedMinGames}戦以上の対象者がいません`;
-  const topStreak = currentRecords.longestTopStreak
-    ? `${await nameFor(currentRecords.longestTopStreak.userId)} ${currentRecords.longestTopStreak.value}連続`
-    : empty;
-  const noLastStreak = currentRecords.longestNoLastStreak
-    ? `${await nameFor(currentRecords.longestNoLastStreak.userId)} ${currentRecords.longestNoLastStreak.value}連続`
-    : empty;
+  const highestRawScore = await summarizeRecordList<MatchRecord>(
+    currentRecords.highestRawScore,
+    async (record) => `${await nameFor(record.userId)} ${record.value}点\n${matchText(record.playedAt)}`,
+    empty,
+    "件"
+  );
+  const highestPoint = await summarizeRecordList<MatchRecord>(
+    currentRecords.highestPoint,
+    async (record) => `${await nameFor(record.userId)} ${formatPoint(record.value)}pt\n${matchText(record.playedAt)}`,
+    empty,
+    "件"
+  );
+  const rawScoreMargin = await summarizeRecordList<MarginRecord>(
+    currentRecords.largestRawScoreWinMargin,
+    async (record) => `${await nameFor(record.userId)} +${record.value}点 vs ${await nameFor(record.secondUserId)}\n${matchText(record.playedAt)}`,
+    empty,
+    "件"
+  );
+  const pointMargin = await summarizeRecordList<MarginRecord>(
+    currentRecords.largestPointWinMargin,
+    async (record) =>
+      `${await nameFor(record.userId)} +${formatPoint(record.value)}pt vs ${await nameFor(record.secondUserId)}\n${matchText(record.playedAt)}`,
+    empty,
+    "件"
+  );
+  const mostTops = await summarizeRecordList<PlayerRecord>(
+    currentRecords.mostTops,
+    async (record) => `${await nameFor(record.userId)} ${record.value}回`,
+    empty,
+    "名"
+  );
+  const bestAverageRank = await summarizeRecordList<PlayerRecord>(
+    currentRecords.bestAverageRank,
+    async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(2)}位`,
+    `${currentRecords.qualifiedMinGames}戦以上の対象者がいません`,
+    "名"
+  );
+  const topStreak = await summarizeRecordList<PlayerRecord>(
+    currentRecords.longestTopStreak,
+    async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
+    empty,
+    "名"
+  );
+  const noLastStreak = await summarizeRecordList<PlayerRecord>(
+    currentRecords.longestNoLastStreak,
+    async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
+    empty,
+    "名"
+  );
 
   await interaction.editReply({
     embeds: [

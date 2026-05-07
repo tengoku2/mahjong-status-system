@@ -30,14 +30,14 @@ export interface MarginRecord extends MatchRecord {
 export interface MahjongRecords {
   totalMatches: number;
   qualifiedMinGames: number;
-  highestRawScore: MatchRecord | null;
-  highestPoint: MatchRecord | null;
-  largestRawScoreWinMargin: MarginRecord | null;
-  largestPointWinMargin: MarginRecord | null;
-  mostTops: PlayerRecord | null;
-  bestAverageRank: PlayerRecord | null;
-  longestTopStreak: PlayerRecord | null;
-  longestNoLastStreak: PlayerRecord | null;
+  highestRawScore: MatchRecord[];
+  highestPoint: MatchRecord[];
+  largestRawScoreWinMargin: MarginRecord[];
+  largestPointWinMargin: MarginRecord[];
+  mostTops: PlayerRecord[];
+  bestAverageRank: PlayerRecord[];
+  longestTopStreak: PlayerRecord[];
+  longestNoLastStreak: PlayerRecord[];
 }
 
 interface PlayerAggregate {
@@ -47,32 +47,43 @@ interface PlayerAggregate {
   rankSum: number;
 }
 
-function compareMatchRecord<T extends MatchRecord>(a: T | null, b: T): T {
-  if (!a) {
-    return b;
+function selectBestRecords<T extends { value: number }>(records: T[], lowerIsBetter = false): T[] {
+  const best = records.reduce<number | null>((current, record) => {
+    if (current === null) {
+      return record.value;
+    }
+    if (record.value === current) {
+      return current;
+    }
+    return lowerIsBetter ? Math.min(current, record.value) : Math.max(current, record.value);
+  }, null);
+
+  if (best === null) {
+    return [];
   }
-  if (b.value !== a.value) {
-    return b.value > a.value ? b : a;
-  }
-  return b.playedAt < a.playedAt ? b : a;
+
+  return records.filter((record) => record.value === best);
 }
 
-function comparePlayerRecord(a: PlayerRecord | null, b: PlayerRecord, lowerIsBetter = false): PlayerRecord {
-  if (!a) {
-    return b;
-  }
-  if (b.value !== a.value) {
-    return lowerIsBetter ? (b.value < a.value ? b : a) : b.value > a.value ? b : a;
-  }
-  return b.userId < a.userId ? b : a;
+function sortMatchRecords<T extends MatchRecord>(records: T[]): T[] {
+  return [...records].sort(
+    (a, b) =>
+      a.playedAt.getTime() - b.playedAt.getTime() ||
+      a.userId.localeCompare(b.userId) ||
+      a.matchId.localeCompare(b.matchId)
+  );
+}
+
+function sortPlayerRecords<T extends PlayerRecord>(records: T[]): T[] {
+  return [...records].sort((a, b) => a.userId.localeCompare(b.userId));
 }
 
 export function calculateRecords(type: MahjongType, results: RecordInput[], qualifiedMinGames = 5): MahjongRecords {
   const maxRank = type === "4p" ? 4 : 3;
   const matches = new Map<string, RecordInput[]>();
   const players = new Map<string, PlayerAggregate>();
-  let highestRawScore: MatchRecord | null = null;
-  let highestPoint: MatchRecord | null = null;
+  const rawScoreRecords: MatchRecord[] = [];
+  const pointRecords: MatchRecord[] = [];
 
   for (const result of results) {
     const group = matches.get(result.match.matchId) ?? [];
@@ -90,13 +101,13 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
     aggregate.rankSum += result.rank;
     players.set(result.userId, aggregate);
 
-    highestRawScore = compareMatchRecord(highestRawScore, {
+    rawScoreRecords.push({
       matchId: result.match.matchId,
       userId: result.userId,
       value: result.rawScore,
       playedAt: result.match.playedAt
     });
-    highestPoint = compareMatchRecord(highestPoint, {
+    pointRecords.push({
       matchId: result.match.matchId,
       userId: result.userId,
       value: result.point,
@@ -104,8 +115,8 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
     });
   }
 
-  let largestRawScoreWinMargin: MarginRecord | null = null;
-  let largestPointWinMargin: MarginRecord | null = null;
+  const rawScoreWinMargins: MarginRecord[] = [];
+  const pointWinMargins: MarginRecord[] = [];
 
   for (const matchResults of matches.values()) {
     const first = matchResults.find((result) => result.rank === 1);
@@ -114,45 +125,41 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
       continue;
     }
 
-    largestRawScoreWinMargin = compareMatchRecord(largestRawScoreWinMargin, {
+    rawScoreWinMargins.push({
       matchId: first.match.matchId,
       userId: first.userId,
       secondUserId: second.userId,
       value: first.rawScore - second.rawScore,
       playedAt: first.match.playedAt
-    }) as MarginRecord;
-    largestPointWinMargin = compareMatchRecord(largestPointWinMargin, {
+    });
+    pointWinMargins.push({
       matchId: first.match.matchId,
       userId: first.userId,
       secondUserId: second.userId,
       value: first.point - second.point,
       playedAt: first.match.playedAt
-    }) as MarginRecord;
+    });
   }
 
-  let mostTops: PlayerRecord | null = null;
-  let bestAverageRank: PlayerRecord | null = null;
+  const topRecords: PlayerRecord[] = [];
+  const averageRankRecords: PlayerRecord[] = [];
 
   for (const player of players.values()) {
-    mostTops = comparePlayerRecord(mostTops, {
+    topRecords.push({
       userId: player.userId,
       value: player.tops
     });
 
     if (player.games >= qualifiedMinGames) {
-      bestAverageRank = comparePlayerRecord(
-        bestAverageRank,
-        {
-          userId: player.userId,
-          value: player.rankSum / player.games
-        },
-        true
-      );
+      averageRankRecords.push({
+        userId: player.userId,
+        value: player.rankSum / player.games
+      });
     }
   }
 
-  let longestTopStreak: PlayerRecord | null = null;
-  let longestNoLastStreak: PlayerRecord | null = null;
+  const topStreakRecords: PlayerRecord[] = [];
+  const noLastStreakRecords: PlayerRecord[] = [];
 
   for (const userId of players.keys()) {
     const sorted = results
@@ -165,11 +172,11 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
       topStreak = result.rank === 1 ? topStreak + 1 : 0;
       noLastStreak = result.rank !== maxRank ? noLastStreak + 1 : 0;
 
-      longestTopStreak = comparePlayerRecord(longestTopStreak, {
+      topStreakRecords.push({
         userId,
         value: topStreak
       });
-      longestNoLastStreak = comparePlayerRecord(longestNoLastStreak, {
+      noLastStreakRecords.push({
         userId,
         value: noLastStreak
       });
@@ -179,13 +186,13 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
   return {
     totalMatches: matches.size,
     qualifiedMinGames,
-    highestRawScore,
-    highestPoint,
-    largestRawScoreWinMargin,
-    largestPointWinMargin,
-    mostTops,
-    bestAverageRank,
-    longestTopStreak,
-    longestNoLastStreak
+    highestRawScore: sortMatchRecords(selectBestRecords(rawScoreRecords)),
+    highestPoint: sortMatchRecords(selectBestRecords(pointRecords)),
+    largestRawScoreWinMargin: sortMatchRecords(selectBestRecords(rawScoreWinMargins)),
+    largestPointWinMargin: sortMatchRecords(selectBestRecords(pointWinMargins)),
+    mostTops: sortPlayerRecords(selectBestRecords(topRecords)),
+    bestAverageRank: sortPlayerRecords(selectBestRecords(averageRankRecords, true)),
+    longestTopStreak: sortPlayerRecords(selectBestRecords(topStreakRecords)),
+    longestNoLastStreak: sortPlayerRecords(selectBestRecords(noLastStreakRecords))
   };
 }

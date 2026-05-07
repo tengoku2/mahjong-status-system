@@ -38,24 +38,25 @@ scripts\with-node22.cmd run local:smoke
 
 ## Commands
 
-- `/mahjong record` 対局を登録
-- `/mahjong stats user type period tournament_name` 個人成績を表示
-- `/mahjong history user count type` 履歴を表示
-- `/mahjong ranking type period tournament_name` ランキングを表示
-- `/mahjong delete match_id` 指定Matchを確認付きで削除
-- `/mahjong undo` サーバー内の最新Matchを確認付きで削除
-- `/mahjong setname user vrc_name` DiscordユーザーとVRC名を紐付け
-- `/mahjong editname user vrc_name` VRC名の紐付けを更新
-- `/mahjong members` VRC名が登録済みのメンバーを表示
+- `/mjs add` 対局を登録
+- `/mjs stats user type period tournament_name` 個人成績を表示
+- `/mjs log user count type` 履歴を表示
+- `/mjs rank type period tournament_name` ランキングを表示
+- `/mjs best type period tournament_name` レコードを表示
+- `/mjs del match_id` 指定Matchを確認付きで削除
+- `/mjs undo` サーバー内の最新Matchを確認付きで削除
+- `/mjs name user vrc_name` DiscordユーザーとVRC名を紐付け
+- `/mjs members` VRC名が登録済みのメンバーを表示
+- `/mjs help` 使えるコマンドを表示
 
-`setname` と `editname` は、サーバー管理権限を持つユーザー、または `.env` の `DEVELOPER_USER_IDS` に含まれるユーザーだけが実行できます。
+`name` は、サーバー管理権限を持つユーザー、または `.env` の `DEVELOPER_USER_IDS` に含まれるユーザーだけが実行できます。`help` は実行ユーザーの権限に応じて表示内容を切り替えます。
 
 ## Record
 
-`record` はSlash Command側で種別、順位ごとのDiscordユーザー、任意の日付、大会名を選択します。続くモーダルでは各順位の最終持ち点だけを入力します。
+`add` はSlash Command側で種別、順位ごとのDiscordユーザー、任意の日付、大会名を選択します。続くモーダルでは各順位の最終持ち点だけを入力します。
 
 ```text
-/mahjong record type:4人半荘 player1:@1位 player2:@2位 player3:@3位 player4:@4位 date:2026-05-07 tournament_name:大会名
+/mjs add type:4人半荘 player1:@1位 player2:@2位 player3:@3位 player4:@4位 date:2026-05-07 tournament_name:大会名
 ```
 
 参加者がサーバー内メンバーではない場合は登録を止めます。

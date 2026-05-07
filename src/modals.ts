@@ -7,8 +7,8 @@ import {
 } from "discord.js";
 import type { MahjongType } from "./types.js";
 
-export function recordModal(type: MahjongType, customId = "mahjong:record"): ModalBuilder {
-  const modal = new ModalBuilder().setCustomId(customId).setTitle("麻雀対局登録");
+export function recordModal(type: MahjongType, customId = "mjs:add"): ModalBuilder {
+  const modal = new ModalBuilder().setCustomId(customId).setTitle("MJS 対局登録");
   const count = type === "4p" ? 4 : 3;
   const rows: ActionRowBuilder<ModalActionRowComponentBuilder>[] = [];
 

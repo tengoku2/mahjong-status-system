@@ -132,13 +132,17 @@ function parseScore(value: string, rank: number): number {
 
 async function assertSetNamePermission(interaction: ChatInputCommandInteraction): Promise<string | null> {
   const guildId = requireGuildId(interaction);
-  const isGuildManager = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
-  const isDeveloper = developerUserIds.has(interaction.user.id);
-  if (!isGuildManager && !isDeveloper) {
+  if (!canManageNames(interaction)) {
     await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
     return null;
   }
   return guildId;
+}
+
+function canManageNames(interaction: ChatInputCommandInteraction): boolean {
+  const isGuildManager = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false;
+  const isDeveloper = developerUserIds.has(interaction.user.id);
+  return isGuildManager || isDeveloper;
 }
 
 async function handleRecordCommand(interaction: ChatInputCommandInteraction) {
@@ -160,7 +164,7 @@ async function handleRecordCommand(interaction: ChatInputCommandInteraction) {
     throw new Error("3人半荘では4位のプレイヤーは指定しないでください。");
   }
 
-  const customId = `mahjong:record:${interaction.id}`;
+  const customId = `mjs:add:${interaction.id}`;
   pendingRecordOptions.set(customId, {
     type,
     tournamentName: tournamentOption(interaction),
@@ -178,7 +182,7 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
   pendingRecordOptions.delete(interaction.customId);
 
   if (!pending) {
-    throw new Error("登録情報の有効期限が切れました。もう一度 /mahjong record を実行してください。");
+    throw new Error("登録情報の有効期限が切れました。もう一度 /mjs add を実行してください。");
   }
 
   const players: PlayerInput[] = pending.players.map((player) => ({
@@ -390,13 +394,13 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   });
 }
 
-function confirmRow(action: "delete" | "undo", matchId: string) {
+function confirmRow(action: "del" | "undo", matchId: string) {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`mahjong:${action}:confirm:${matchId}`)
+      .setCustomId(`mjs:${action}:confirm:${matchId}`)
       .setLabel("削除する")
       .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId(`mahjong:${action}:cancel:${matchId}`).setLabel("キャンセル").setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`mjs:${action}:cancel:${matchId}`).setLabel("キャンセル").setStyle(ButtonStyle.Secondary)
   );
 }
 
@@ -416,7 +420,7 @@ async function handleDeleteCommand(interaction: ChatInputCommandInteraction) {
 
   await interaction.reply({
     content: `Match \`${matchId}\` を削除しますか？`,
-    components: [confirmRow("delete", matchId)],
+    components: [confirmRow("del", matchId)],
     flags: MessageFlags.Ephemeral
   });
 }
@@ -534,30 +538,61 @@ async function handleMembers(interaction: ChatInputCommandInteraction) {
   });
 }
 
+async function handleHelp(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const canUseName = canManageNames(interaction);
+  const lines = [
+    "`/mjs add` 対局結果を登録",
+    "`/mjs stats` 個人成績を表示",
+    "`/mjs rank` ランキングを表示",
+    "`/mjs best` レコードを表示",
+    "`/mjs log` 対局履歴を表示",
+    "`/mjs del` 指定した対局を削除",
+    "`/mjs undo` 最新対局を削除",
+    "`/mjs members` VRC名の登録メンバーを表示",
+    "`/mjs help` このヘルプを表示"
+  ];
+
+  if (canUseName) {
+    lines.splice(7, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");
+  }
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("MJS Help")
+        .setDescription(lines.join("\n"))
+        .setFooter({ text: canUseName ? "管理者・開発者向けコマンドを含めて表示しています。" : "管理者向けコマンドは非表示です。" })
+    ]
+  });
+}
+
 async function handleChatInput(interaction: ChatInputCommandInteraction) {
-  if (interaction.commandName !== "mahjong") {
+  if (interaction.commandName !== "mjs") {
     return;
   }
 
   const subcommand = interaction.options.getSubcommand();
-  if (subcommand === "record") {
+  if (subcommand === "add") {
     await handleRecordCommand(interaction);
   } else if (subcommand === "stats") {
     await handleStats(interaction);
-  } else if (subcommand === "history") {
+  } else if (subcommand === "log") {
     await handleHistory(interaction);
-  } else if (subcommand === "ranking") {
+  } else if (subcommand === "rank") {
     await handleRanking(interaction);
-  } else if (subcommand === "records") {
+  } else if (subcommand === "best") {
     await handleRecords(interaction);
-  } else if (subcommand === "delete") {
+  } else if (subcommand === "del") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {
     await handleUndoCommand(interaction);
-  } else if (subcommand === "setname" || subcommand === "editname") {
+  } else if (subcommand === "name") {
     await handleSetName(interaction);
   } else if (subcommand === "members") {
     await handleMembers(interaction);
+  } else if (subcommand === "help") {
+    await handleHelp(interaction);
   }
 }
 
@@ -569,9 +604,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
       await handleChatInput(interaction);
-    } else if (interaction.isModalSubmit() && interaction.customId.startsWith("mahjong:record")) {
+    } else if (interaction.isModalSubmit() && interaction.customId.startsWith("mjs:add")) {
       await handleRecordModal(interaction);
-    } else if (interaction.isButton() && interaction.customId.startsWith("mahjong:")) {
+    } else if (interaction.isButton() && interaction.customId.startsWith("mjs:")) {
       await handleConfirmButton(interaction);
     }
   } catch (error) {

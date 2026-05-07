@@ -26,11 +26,7 @@ function addTypeOption(command: SlashCommandSubcommandBuilder, required = false)
 
 function addPeriodOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addStringOption((option: SlashCommandStringOption) =>
-    option
-      .setName("period")
-      .setDescription("集計期間")
-      .setRequired(required)
-      .addChoices(...periodChoices)
+    option.setName("period").setDescription("集計期間").setRequired(required).addChoices(...periodChoices)
   );
 }
 
@@ -62,12 +58,12 @@ function addRecordUserOptions(command: SlashCommandSubcommandBuilder) {
     );
 }
 
-export const mahjongCommand = new SlashCommandBuilder()
-  .setName("mahjong")
-  .setDescription("VRChat麻雀の成績を管理します")
+export const mjsCommand = new SlashCommandBuilder()
+  .setName("mjs")
+  .setDescription("麻雀成績システム")
   .addSubcommand((command) =>
     addTournamentOption(
-      addDateOption(addRecordUserOptions(addTypeOption(command.setName("record").setDescription("対局結果を登録します"), true)))
+      addDateOption(addRecordUserOptions(addTypeOption(command.setName("add").setDescription("対局結果を登録します"), true)))
     )
   )
   .addSubcommand((command) =>
@@ -75,21 +71,21 @@ export const mahjongCommand = new SlashCommandBuilder()
   )
   .addSubcommand((command) =>
     addTypeOption(
-      addUserOption(command.setName("history").setDescription("対局履歴を表示します")).addIntegerOption(
+      addUserOption(command.setName("log").setDescription("対局履歴を表示します")).addIntegerOption(
         (option: SlashCommandIntegerOption) =>
           option.setName("count").setDescription("表示件数").setMinValue(1).setMaxValue(50)
       )
     )
   )
   .addSubcommand((command) =>
-    addTournamentOption(addPeriodOption(addTypeOption(command.setName("ranking").setDescription("ランキングを表示します"))))
+    addTournamentOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addPeriodOption(addTypeOption(command.setName("records").setDescription("レコードを表示します"))))
+    addTournamentOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("レコードを表示します"))))
   )
   .addSubcommand((command) =>
     command
-      .setName("delete")
+      .setName("del")
       .setDescription("指定した対局を削除します")
       .addStringOption((option: SlashCommandStringOption) =>
         option.setName("match_id").setDescription("削除するMatch ID").setRequired(true)
@@ -98,8 +94,8 @@ export const mahjongCommand = new SlashCommandBuilder()
   .addSubcommand((command) => command.setName("undo").setDescription("このサーバーの最新対局を削除します"))
   .addSubcommand((command) =>
     command
-      .setName("setname")
-      .setDescription("管理者または開発者がDiscordユーザーとVRC名を紐づけます")
+      .setName("name")
+      .setDescription("管理者、または開発者がDiscordユーザーとVRC名を紐づけます")
       .addUserOption((option: SlashCommandUserOption) =>
         option.setName("user").setDescription("対象のサーバーメンバー").setRequired(true)
       )
@@ -107,17 +103,7 @@ export const mahjongCommand = new SlashCommandBuilder()
         option.setName("vrc_name").setDescription("VRC名").setRequired(true).setMaxLength(100)
       )
   )
-  .addSubcommand((command) =>
-    command
-      .setName("editname")
-      .setDescription("管理者または開発者がVRC名の紐づけを変更します")
-      .addUserOption((option: SlashCommandUserOption) =>
-        option.setName("user").setDescription("対象のサーバーメンバー").setRequired(true)
-      )
-      .addStringOption((option: SlashCommandStringOption) =>
-        option.setName("vrc_name").setDescription("変更後のVRC名").setRequired(true).setMaxLength(100)
-      )
-  )
-  .addSubcommand((command) => command.setName("members").setDescription("VRC名が登録されているメンバーを表示します"));
+  .addSubcommand((command) => command.setName("members").setDescription("VRC名が登録されているメンバーを表示します"))
+  .addSubcommand((command) => command.setName("help").setDescription("使えるコマンドを表示します"));
 
-export const commands = [mahjongCommand.toJSON()];
+export const commands = [mjsCommand.toJSON()];

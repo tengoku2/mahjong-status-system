@@ -209,7 +209,7 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
       new EmbedBuilder()
         .setTitle("対局を登録しました")
         .setDescription(
-          `Match ID: \`${match.matchId}\`\n種別: ${typeLabel(pending.type)}\n対局日: ${formatDate(match.playedAt)}${
+          `種別: ${typeLabel(pending.type)}\n対局日: ${formatDate(match.playedAt)}${
             match.tournamentName ? `\n大会名: ${match.tournamentName}` : ""
           }`
         )
@@ -237,7 +237,7 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
     .slice(0, 10)
     .map(
       (result) =>
-        `\`${result.match.matchId.slice(0, 8)}\` ${formatDate(result.match.playedAt)} ${result.rank}位 ${result.rawScore}点 ${formatPoint(
+        `${formatDate(result.match.playedAt)} ${result.rank}位 ${result.rawScore}点 ${formatPoint(
           result.point
         )}pt`
     )
@@ -332,31 +332,28 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
     nameCache.set(userId, name);
     return name;
   };
-  const matchText = (matchId: string, playedAt: Date) => `Match \`${matchId.slice(0, 8)}\` / ${formatDate(playedAt)}`;
+  const matchText = (playedAt: Date) => formatDate(playedAt);
   const empty = "対象データがありません";
 
   const highestRawScore = currentRecords.highestRawScore
     ? `${await nameFor(currentRecords.highestRawScore.userId)} ${currentRecords.highestRawScore.value}点\n${matchText(
-        currentRecords.highestRawScore.matchId,
         currentRecords.highestRawScore.playedAt
       )}`
     : empty;
   const highestPoint = currentRecords.highestPoint
     ? `${await nameFor(currentRecords.highestPoint.userId)} ${formatPoint(currentRecords.highestPoint.value)}pt\n${matchText(
-        currentRecords.highestPoint.matchId,
         currentRecords.highestPoint.playedAt
       )}`
     : empty;
   const rawScoreMargin = currentRecords.largestRawScoreWinMargin
     ? `${await nameFor(currentRecords.largestRawScoreWinMargin.userId)} +${currentRecords.largestRawScoreWinMargin.value}点 vs ${await nameFor(
         currentRecords.largestRawScoreWinMargin.secondUserId
-      )}\n${matchText(currentRecords.largestRawScoreWinMargin.matchId, currentRecords.largestRawScoreWinMargin.playedAt)}`
+      )}\n${matchText(currentRecords.largestRawScoreWinMargin.playedAt)}`
     : empty;
   const pointMargin = currentRecords.largestPointWinMargin
     ? `${await nameFor(currentRecords.largestPointWinMargin.userId)} +${formatPoint(
         currentRecords.largestPointWinMargin.value
       )}pt vs ${await nameFor(currentRecords.largestPointWinMargin.secondUserId)}\n${matchText(
-        currentRecords.largestPointWinMargin.matchId,
         currentRecords.largestPointWinMargin.playedAt
       )}`
     : empty;

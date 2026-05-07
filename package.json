@@ -1,0 +1,35 @@
+{
+  "name": "mahjong-status",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "start:prod": "node scripts/start-production.mjs",
+    "register": "tsx src/register-commands.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "local:smoke": "tsx scripts/smoke.ts",
+    "db:deploy": "prisma migrate deploy",
+    "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prisma": "^6.19.3",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.5"
+  },
+  "engines": {
+    "node": ">=18.18"
+  }
+}

@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Guild {
+  guildId   String        @id @map("guild_id")
+  users     User[]
+  profiles  UserProfile[]
+  matches   Match[]
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  @@map("guilds")
+}
+
+model User {
+  guildId   String   @map("guild_id")
+  userId    String   @map("user_id")
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([guildId, userId])
+  @@map("users")
+}
+
+model UserProfile {
+  guildId   String   @map("guild_id")
+  userId    String   @map("user_id")
+  vrcName   String   @map("vrc_name")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@id([guildId, userId])
+  @@map("user_profiles")
+}
+
+model Match {
+  matchId        String   @id @default(cuid()) @map("match_id")
+  guildId        String   @map("guild_id")
+  type           String
+  tournamentName String?  @map("tournament_name")
+  playedAt       DateTime @default(now()) @map("played_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  guild          Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  results        Result[]
+
+  @@index([guildId, type, playedAt])
+  @@index([guildId, type, tournamentName, playedAt])
+  @@map("matches")
+}
+
+model Result {
+  resultId String @id @default(cuid()) @map("result_id")
+  matchId  String @map("match_id")
+  userId   String @map("user_id")
+  rank     Int
+  rawScore Int    @map("raw_score")
+  point    Float
+  match    Match  @relation(fields: [matchId], references: [matchId], onDelete: Cascade)
+
+  @@unique([matchId, userId])
+  @@unique([matchId, rank])
+  @@index([userId])
+  @@map("results")
+}

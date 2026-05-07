@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.tools
+prisma/*.db
+*.db
+*.db-journal
+certs/*.pem

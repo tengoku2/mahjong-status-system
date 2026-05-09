@@ -5,11 +5,12 @@ import {
   TextInputStyle,
   type ModalActionRowComponentBuilder
 } from "discord.js";
+import { expectedPlayerCount } from "./scoring.js";
 import type { MahjongType } from "./types.js";
 
 export function recordModal(type: MahjongType, customId = "mjs:add"): ModalBuilder {
   const modal = new ModalBuilder().setCustomId(customId).setTitle("MJS 対局登録");
-  const count = type === "4p" ? 4 : 3;
+  const count = expectedPlayerCount(type);
   const rows: ActionRowBuilder<ModalActionRowComponentBuilder>[] = [];
 
   for (let index = 1; index <= count; index += 1) {

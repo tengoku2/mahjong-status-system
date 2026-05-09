@@ -1,4 +1,4 @@
-import { expectedPlayerCount } from "./scoring.js";
+import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import type { MahjongType, PlayerInput } from "./types.js";
 
 const userIdPattern = /^(?:<@!?)?(\d{17,20})>?$/;
@@ -11,14 +11,11 @@ export interface ParsedPlayerLine {
 }
 
 export function parseMahjongType(value: string): MahjongType {
-  const normalized = value.trim().toLowerCase();
-  if (["4", "4p", "四人", "4人"].includes(normalized)) {
-    return "4p";
+  try {
+    return normalizeMahjongType(value);
+  } catch {
+    throw new Error("麻雀種別は 3p, 4p, 3p_east, 4p_east のいずれかで入力してください。");
   }
-  if (["3", "3p", "三人", "3人"].includes(normalized)) {
-    return "3p";
-  }
-  throw new Error("麻雀種別は 3p または 4p で入力してください。");
 }
 
 export function userIdFromRef(userRef: string): string | null {

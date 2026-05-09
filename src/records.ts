@@ -1,4 +1,5 @@
 import type { MahjongType } from "./types.js";
+import { expectedPlayerCount } from "./scoring.js";
 
 export interface RecordInput {
   userId: string;
@@ -79,7 +80,7 @@ function sortPlayerRecords<T extends PlayerRecord>(records: T[]): T[] {
 }
 
 export function calculateRecords(type: MahjongType, results: RecordInput[], qualifiedMinGames = 5): MahjongRecords {
-  const maxRank = type === "4p" ? 4 : 3;
+  const maxRank = expectedPlayerCount(type);
   const matches = new Map<string, RecordInput[]>();
   const players = new Map<string, PlayerAggregate>();
   const rawScoreRecords: MatchRecord[] = [];

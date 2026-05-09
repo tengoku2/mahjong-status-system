@@ -1,4 +1,4 @@
-export type MahjongType = "3p" | "4p";
+export type MahjongType = "3p" | "4p" | "3p_east" | "4p_east";
 
 export type Period =
   | "recent_5"

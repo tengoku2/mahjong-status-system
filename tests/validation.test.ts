@@ -7,6 +7,10 @@ describe("validation", () => {
     expect(parseMahjongType("4人")).toBe("4p");
     expect(parseMahjongType("3p")).toBe("3p");
     expect(parseMahjongType("3人")).toBe("3p");
+    expect(parseMahjongType("4p_east")).toBe("4p_east");
+    expect(parseMahjongType("4人東風")).toBe("4p_east");
+    expect(parseMahjongType("3p_east")).toBe("3p_east");
+    expect(parseMahjongType("3人東風")).toBe("3p_east");
   });
 
   it("parses player lines with explicit ranks", () => {

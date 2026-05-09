@@ -17,9 +17,10 @@ import {
 import { createApiServer } from "./external-api.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
+import { parsePlayedAtInput } from "./date-input.js";
 import { formatPeriodLabel } from "./periods.js";
 import { prisma } from "./prisma.js";
-import { expectedPlayerCount } from "./scoring.js";
+import { expectedPlayerCount, isEastGame, normalizeMahjongType } from "./scoring.js";
 import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking, records } from "./services.js";
 import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
@@ -43,6 +44,7 @@ const client = new Client({
 
 const port = Number(process.env.PORT ?? 8000);
 const healthServer = createApiServer(client);
+const discordLoginTimeoutMs = Number(process.env.DISCORD_LOGIN_TIMEOUT_MS ?? 30_000);
 
 const pendingRecordOptions = new Map<
   string,
@@ -62,7 +64,7 @@ function requireGuildId(interaction: { guildId: string | null }): string {
 }
 
 function typeOption(interaction: ChatInputCommandInteraction): MahjongType {
-  return (interaction.options.getString("type") ?? "4p") as MahjongType;
+  return normalizeMahjongType(interaction.options.getString("type") ?? "4p");
 }
 
 function periodOption(interaction: ChatInputCommandInteraction): Period {
@@ -79,26 +81,7 @@ function tournamentOption(interaction: ChatInputCommandInteraction): string | un
 }
 
 function parsePlayedAtOption(interaction: ChatInputCommandInteraction): Date {
-  const value = interaction.options.getString("date")?.trim();
-  if (!value) {
-    return new Date();
-  }
-
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) {
-    throw new Error("対局日は YYYY-MM-DD 形式で入力してください。例: 2026-05-07");
-  }
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(year, month - 1, day, 12, 0, 0, 0);
-
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    throw new Error("存在する日付を入力してください。例: 2026-05-07");
-  }
-
-  return date;
+  return parsePlayedAtInput(interaction.options.getString("date"));
 }
 
 function formatDate(date: Date): string {
@@ -108,7 +91,14 @@ function formatDate(date: Date): string {
 }
 
 function typeLabel(type: MahjongType): string {
-  return type === "4p" ? "4人半荘" : "3人半荘";
+  const normalizedType = normalizeMahjongType(type);
+  const labels: Record<MahjongType, string> = {
+    "4p": "4人半荘",
+    "3p": "3人半荘",
+    "4p_east": "4人東風",
+    "3p_east": "3人東風"
+  };
+  return labels[normalizedType];
 }
 
 async function summarizeRecordList<T>(
@@ -173,11 +163,11 @@ async function handleRecordCommand(interaction: ChatInputCommandInteraction) {
     players.push({ userId: user.id, rank });
   }
 
-  if (type === "4p" && !interaction.options.getUser("player4")) {
-    throw new Error("4人半荘では4位のプレイヤーを指定してください。");
+  if (expected === 4 && !interaction.options.getUser("player4")) {
+    throw new Error(`${typeLabel(type)}では4位のプレイヤーを指定してください。`);
   }
-  if (type === "3p" && interaction.options.getUser("player4")) {
-    throw new Error("3人半荘では4位のプレイヤーは指定しないでください。");
+  if (expected === 3 && interaction.options.getUser("player4")) {
+    throw new Error(`${typeLabel(type)}では4位のプレイヤーは指定しないでください。`);
   }
 
   const customId = `mjs:add:${interaction.id}`;
@@ -308,10 +298,16 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const period = rankingPeriodOption(interaction);
   const tournamentName = tournamentOption(interaction);
   const entries = await ranking(guildId, type, period, tournamentName);
+  const rankingMetric = isEastGame(type) ? "平均ポイントランキング" : "ポイントランキング";
   const lines = await Promise.all(
     entries.slice(0, 20).map(async (entry, index) => {
       const member = await fetchMember(interaction, entry.userId);
       const name = await displayName(guildId, member, entry.userId);
+      if (isEastGame(type)) {
+        return `${index + 1}. ${name} 平均${formatPoint(entry.averagePoint)}pt (${entry.games}戦 / 合計${formatPoint(
+          entry.totalPoint
+        )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
+      }
       return `${index + 1}. ${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}戦 / 平均${formatPoint(
         entry.averagePoint
       )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
@@ -321,7 +317,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle("ポイントランキング")
+        .setTitle(rankingMetric)
         .setDescription(
           `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n${
             lines.join("\n") || "集計対象がありません。"
@@ -630,6 +626,20 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
 });
 
+client.on(Events.Debug, (message) => {
+  if (process.env.DISCORD_DEBUG === "1") {
+    console.debug(`[discord:debug] ${message}`);
+  }
+});
+
+client.on(Events.Error, (error) => {
+  console.error("[discord:error]", error);
+});
+
+client.on(Events.Warn, (message) => {
+  console.warn(`[discord:warn] ${message}`);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
@@ -666,4 +676,18 @@ process.once("SIGINT", () => {
   client.destroy();
 });
 
-await client.login(token);
+function timeout(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(`Discord login timed out after ${ms}ms.`)), ms);
+  });
+}
+
+try {
+  console.log(`Starting Discord login for client ${process.env.DISCORD_CLIENT_ID ?? "unknown"}.`);
+  await Promise.race([client.login(token), timeout(discordLoginTimeoutMs)]);
+} catch (error) {
+  console.error("Discord login failed.", error);
+  healthServer.close();
+  process.exitCode = 1;
+  throw error;
+}

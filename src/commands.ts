@@ -9,7 +9,9 @@ import { periodChoices } from "./periods.js";
 
 const typeChoices = [
   { name: "4人半荘", value: "4p" },
-  { name: "3人半荘", value: "3p" }
+  { name: "3人半荘", value: "3p" },
+  { name: "4人東風", value: "4p_east" },
+  { name: "3人東風", value: "3p_east" }
 ] as const;
 
 function addUserOption(command: SlashCommandSubcommandBuilder, required = false) {
@@ -38,7 +40,7 @@ function addTournamentOption(command: SlashCommandSubcommandBuilder, required = 
 
 function addDateOption(command: SlashCommandSubcommandBuilder) {
   return command.addStringOption((option: SlashCommandStringOption) =>
-    option.setName("date").setDescription("対局日。例: 2026-05-07").setRequired(false).setMaxLength(10)
+    option.setName("date").setDescription("対局日。例: 5/5, 0505, 昨日, 2026-05-07").setRequired(false).setMaxLength(20)
   );
 }
 

@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { calculateResults } from "./scoring.js";
+import { calculateResults, expectedPlayerCount, isEastGame, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { calendarStart, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
@@ -46,7 +46,8 @@ export async function createMatch(
   tournamentName?: string,
   playedAt?: Date
 ) {
-  const calculated = calculateResults(type, players);
+  const normalizedType = normalizeMahjongType(type);
+  const calculated = calculateResults(normalizedType, players);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
   return prisma.$transaction(async (tx) => {
@@ -55,7 +56,7 @@ export async function createMatch(
     return tx.match.create({
       data: {
         guildId,
-        type,
+        type: normalizedType,
         tournamentName: normalizedTournamentName,
         playedAt,
         results: {
@@ -86,7 +87,8 @@ export async function createExternalMatch(
   playedAt: Date | undefined,
   identity: ExternalMatchIdentity
 ) {
-  const calculated = calculateResults(type, players);
+  const normalizedType = normalizeMahjongType(type);
+  const calculated = calculateResults(normalizedType, players);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
   return prisma.$transaction(async (tx) => {
@@ -122,7 +124,7 @@ export async function createExternalMatch(
     const match = await tx.match.create({
       data: {
         guildId,
-        type,
+        type: normalizedType,
         tournamentName: normalizedTournamentName,
         playedAt,
         results: {
@@ -172,6 +174,7 @@ async function periodMatchIds(
   tournamentName?: string
 ): Promise<string[] | null> {
   const limit = recentLimit(period);
+  const normalizedType = normalizeMahjongType(type);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
   if (!limit) {
     return null;
@@ -180,7 +183,7 @@ async function periodMatchIds(
   const matches = await prisma.match.findMany({
     where: {
       guildId,
-      type,
+      type: normalizedType,
       tournamentName: normalizedTournamentName,
       results: userId
         ? {
@@ -210,6 +213,7 @@ export async function getResultsForPeriod(
   tournamentName?: string
 ) {
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const normalizedType = normalizeMahjongType(type);
   const matchIds = await periodMatchIds(guildId, type, period, userId, normalizedTournamentName);
   const start = calendarStart(period);
 
@@ -218,7 +222,7 @@ export async function getResultsForPeriod(
       userId,
       match: {
         guildId,
-        type,
+        type: normalizedType,
         tournamentName: normalizedTournamentName,
         matchId: matchIds ? { in: matchIds } : undefined,
         playedAt: start ? { gte: start } : undefined
@@ -236,12 +240,13 @@ export async function getResultsForPeriod(
 }
 
 export async function aggregateStats(guildId: string, type: MahjongType, period: Period, userId: string, tournamentName?: string) {
+  const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, userId, tournamentName);
   const totalGames = results.length;
   const totalPoint = results.reduce((sum, result) => sum + result.point, 0);
   const averageRank = totalGames ? results.reduce((sum, result) => sum + result.rank, 0) / totalGames : 0;
   const averagePoint = totalGames ? totalPoint / totalGames : 0;
-  const maxRank = type === "4p" ? 4 : 3;
+  const maxRank = expectedPlayerCount(normalizedType);
   const rankCounts = new Map<number, number>();
 
   for (let rank = 1; rank <= maxRank; rank += 1) {
@@ -259,6 +264,7 @@ export async function aggregateStats(guildId: string, type: MahjongType, period:
 }
 
 export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
+  const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
@@ -281,12 +287,18 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
       averageRank: entry.rankSum / entry.games,
       averagePoint: entry.totalPoint / entry.games
     }))
-    .sort((a, b) => b.totalPoint - a.totalPoint);
+    .sort((a, b) => {
+      if (isEastGame(normalizedType)) {
+        return b.averagePoint - a.averagePoint || b.totalPoint - a.totalPoint || a.userId.localeCompare(b.userId);
+      }
+      return b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId);
+    });
 }
 
 export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
+  const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
-  return calculateRecords(type, results);
+  return calculateRecords(normalizedType, results);
 }
 
 export async function deleteMatch(guildId: string, matchId: string) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculatePoint, calculateResults, expectedPlayerCount } from "../src/scoring.js";
+import { calculatePoint, calculateResults, expectedPlayerCount, isEastGame, normalizeMahjongType } from "../src/scoring.js";
 
 describe("scoring", () => {
   it("calculates 4p points with uma", () => {
@@ -13,6 +13,20 @@ describe("scoring", () => {
     expect(calculatePoint("3p", 1, 50000)).toBe(30);
     expect(calculatePoint("3p", 2, 35000)).toBe(0);
     expect(calculatePoint("3p", 3, 20000)).toBe(-30);
+  });
+
+  it("calculates east games as separate types with the same point rules", () => {
+    expect(calculatePoint("4p_east", 1, 42000)).toBe(42);
+    expect(calculatePoint("4p_east", 4, 2000)).toBe(-48);
+    expect(calculatePoint("3p_east", 1, 50000)).toBe(25);
+    expect(calculatePoint("3p_east", 3, 20000)).toBe(-25);
+  });
+
+  it("normalizes legacy and alias type values before scoring", () => {
+    expect(normalizeMahjongType("4")).toBe("4p");
+    expect(normalizeMahjongType("3")).toBe("3p");
+    expect(normalizeMahjongType("4p_tonpu")).toBe("4p_east");
+    expect(calculatePoint("4", 1, 42000)).toBe(62);
   });
 
   it("keeps calculated result fields", () => {
@@ -32,5 +46,12 @@ describe("scoring", () => {
   it("returns expected player counts", () => {
     expect(expectedPlayerCount("4p")).toBe(4);
     expect(expectedPlayerCount("3p")).toBe(3);
+    expect(expectedPlayerCount("4p_east")).toBe(4);
+    expect(expectedPlayerCount("3p_east")).toBe(3);
+  });
+
+  it("identifies east games", () => {
+    expect(isEastGame("4p")).toBe(false);
+    expect(isEastGame("4p_east")).toBe(true);
   });
 });

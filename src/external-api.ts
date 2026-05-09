@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { URL } from "node:url";
 import type { Client } from "discord.js";
 import { createExternalMatch } from "./services.js";
+import { normalizeMahjongType } from "./scoring.js";
 import type { MahjongType, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -76,14 +77,12 @@ function requireString(value: unknown, fieldName: string): string {
 }
 
 function normalizeType(value: unknown): MahjongType {
-  const text = requireString(value, "type").toLowerCase();
-  if (text === "4" || text === "4p") {
-    return "4p";
+  const text = requireString(value, "type");
+  try {
+    return normalizeMahjongType(text);
+  } catch {
+    throw new HttpError(400, "type must be 3p, 4p, 3p_east, or 4p_east.");
   }
-  if (text === "3" || text === "3p") {
-    return "3p";
-  }
-  throw new HttpError(400, "type must be 3, 3p, 4, or 4p.");
 }
 
 function parsePlayedAt(value: unknown): Date | undefined {
@@ -210,10 +209,12 @@ export function createApiServer(client: Client) {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
-      if (request.method === "GET" && url.pathname === "/health") {
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
         sendJson(response, 200, {
           ok: true,
           discordReady: client.isReady(),
+          discordStatus: client.ws?.status,
+          discordPing: client.ws?.ping,
           uptime: process.uptime()
         });
         return;

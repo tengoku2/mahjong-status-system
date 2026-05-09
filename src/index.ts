@@ -213,7 +213,7 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle("対局を登録しました")
+        .setTitle(`${typeLabel(pending.type)} 対局を登録しました`)
         .setDescription(
           `種別: ${typeLabel(pending.type)}\n対局日: ${formatDate(match.playedAt)}${
             match.tournamentName ? `\n大会名: ${match.tournamentName}` : ""
@@ -252,7 +252,7 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${name} の成績`)
+        .setTitle(`${typeLabel(type)} ${name} の成績`)
         .setDescription(
           `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}`
         )
@@ -285,7 +285,7 @@ async function handleHistory(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${name} の履歴`)
+        .setTitle(`${typeLabel(type)} ${name} の履歴`)
         .setDescription(`種別: ${typeLabel(type)}\n${lines.join("\n") || "対局履歴がありません。"}`)
     ]
   });
@@ -317,7 +317,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(rankingMetric)
+        .setTitle(`${typeLabel(type)} ${rankingMetric}`)
         .setDescription(
           `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n${
             lines.join("\n") || "集計対象がありません。"
@@ -400,7 +400,7 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle("レコード")
+        .setTitle(`${typeLabel(type)} レコード`)
         .setDescription(
           `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n対象対局数: ${
             currentRecords.totalMatches

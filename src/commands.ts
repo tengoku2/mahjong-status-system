@@ -40,7 +40,7 @@ function addTournamentOption(command: SlashCommandSubcommandBuilder, required = 
 
 function addDateOption(command: SlashCommandSubcommandBuilder) {
   return command.addStringOption((option: SlashCommandStringOption) =>
-    option.setName("date").setDescription("対局日。例: 5/5, 0505, 昨日, 2026-05-07").setRequired(false).setMaxLength(20)
+    option.setName("date").setDescription("対局日。例: 5/5, 0505, 昨日, 2026-05-07").setRequired(true).setMaxLength(20)
   );
 }
 
@@ -64,9 +64,7 @@ export const mjsCommand = new SlashCommandBuilder()
   .setName("mjs")
   .setDescription("麻雀成績システム")
   .addSubcommand((command) =>
-    addTournamentOption(
-      addDateOption(addRecordUserOptions(addTypeOption(command.setName("add").setDescription("対局結果を登録します"), true)))
-    )
+    addTournamentOption(addRecordUserOptions(addDateOption(addTypeOption(command.setName("add").setDescription("対局結果を登録します"), true))))
   )
   .addSubcommand((command) =>
     addTournamentOption(addPeriodOption(addTypeOption(addUserOption(command.setName("stats").setDescription("成績を表示します")))))

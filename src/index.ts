@@ -20,7 +20,7 @@ import { recordModal } from "./modals.js";
 import { parsePlayedAtInput } from "./date-input.js";
 import { formatPeriodLabel } from "./periods.js";
 import { prisma } from "./prisma.js";
-import { expectedPlayerCount, isEastGame, normalizeMahjongType } from "./scoring.js";
+import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking, records } from "./services.js";
 import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
@@ -298,16 +298,10 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const period = rankingPeriodOption(interaction);
   const tournamentName = tournamentOption(interaction);
   const entries = await ranking(guildId, type, period, tournamentName);
-  const rankingMetric = isEastGame(type) ? "平均ポイントランキング" : "ポイントランキング";
   const lines = await Promise.all(
     entries.slice(0, 20).map(async (entry, index) => {
       const member = await fetchMember(interaction, entry.userId);
       const name = await displayName(guildId, member, entry.userId);
-      if (isEastGame(type)) {
-        return `${index + 1}. ${name} 平均${formatPoint(entry.averagePoint)}pt (${entry.games}戦 / 合計${formatPoint(
-          entry.totalPoint
-        )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
-      }
       return `${index + 1}. ${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}戦 / 平均${formatPoint(
         entry.averagePoint
       )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
@@ -317,7 +311,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${typeLabel(type)} ${rankingMetric}`)
+        .setTitle(`${typeLabel(type)} ポイントランキング`)
         .setDescription(
           `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n${
             lines.join("\n") || "集計対象がありません。"

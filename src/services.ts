@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { calculateResults, expectedPlayerCount, isEastGame, normalizeMahjongType } from "./scoring.js";
+import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { calendarStart, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
@@ -264,7 +264,6 @@ export async function aggregateStats(guildId: string, type: MahjongType, period:
 }
 
 export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
-  const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
@@ -287,12 +286,7 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
       averageRank: entry.rankSum / entry.games,
       averagePoint: entry.totalPoint / entry.games
     }))
-    .sort((a, b) => {
-      if (isEastGame(normalizedType)) {
-        return b.averagePoint - a.averagePoint || b.totalPoint - a.totalPoint || a.userId.localeCompare(b.userId);
-      }
-      return b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId);
-    });
+    .sort((a, b) => b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId));
 }
 
 export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {

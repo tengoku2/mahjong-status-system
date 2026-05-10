@@ -1,18 +1,18 @@
-# TANKI Sample Handling
+# TANKIサンプルの扱い
 
-Do not commit TANKI source files, package files, raw logs, screenshots, or extracted raw data.
+TANKIの原本ファイル、パッケージ、未加工ログ、スクリーンショット、抽出した生データはコミットしないでください。
 
-Use local-only folders:
+ローカル専用フォルダとして使う場所:
 
-- `samples/private/` for original local files
-- `samples/sanitized/` for generated summaries or redacted outputs
+- `samples/private/`: 原本を置く場所
+- `samples/sanitized/`: 構造サマリや伏せ字済み出力を置く場所
 
-Both folders are ignored by Git.
+どちらのフォルダもGit管理外です。
 
-Generate a shareable structural summary:
+共有用の構造サマリを作る例:
 
 ```bat
 scripts\with-node22.cmd exec -- tsx scripts\sanitize-tanki-sample.ts samples\private\sample.json --mode summary
 ```
 
-Use `--mode redacted` only for local review. It may preserve original field names, so do not share it unless you have manually checked that no licensed/internal structure remains.
+`--mode redacted` はローカル確認用です。元のフィールド名が残る可能性があるため、ライセンス対象の内部構造が含まれていないことを手動確認するまでは共有しないでください。

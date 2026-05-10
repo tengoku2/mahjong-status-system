@@ -6,3 +6,15 @@ dist/
 *.db-journal
 prisma/dev.db
 certs/*.pem
+
+# TANKI licensed/private artifacts must stay local.
+samples/private/
+samples/sanitized/
+tanki-private/
+tanki-sanitized/
+*.unitypackage
+*.prefab
+*.asset
+*.meta
+*.har
+*.log

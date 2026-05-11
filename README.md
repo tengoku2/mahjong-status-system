@@ -91,6 +91,8 @@ Content-Type: application/json
 
 ## TANKI Log Watcher
 
+Event dry-run/register procedure: [docs/tanki-event-test-runbook.md](docs/tanki-event-test-runbook.md)
+
 VRChat Udonから任意の動的URLへ直接POSTする方式は制約が強いため、初期連携ではVRChatのログに許可済みの対局結果データを1行出し、ローカル補助スクリプトがBot APIへ送信します。
 
 TANKI側で半荘・東風終了時に次の形式の1行をログへ出します。TANKI内部名や内部構造は含めません。

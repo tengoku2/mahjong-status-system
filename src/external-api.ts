@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { Client } from "discord.js";
+import { prisma } from "./prisma.js";
 import { createExternalMatch } from "./services.js";
-import { normalizeMahjongType } from "./scoring.js";
+import { calculateResults, normalizeMahjongType } from "./scoring.js";
 import type { MahjongType, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -16,12 +17,15 @@ interface ExternalMatchPayload {
   tournamentName?: unknown;
   externalSource?: unknown;
   externalMatchId?: unknown;
+  dryRun?: unknown;
   players?: unknown;
 }
 
 interface ExternalPlayerPayload {
   discordUserId?: unknown;
   userId?: unknown;
+  displayName?: unknown;
+  vrcName?: unknown;
   rank?: unknown;
   rawScore?: unknown;
 }
@@ -102,7 +106,22 @@ function parsePlayedAt(value: unknown): Date | undefined {
   return date;
 }
 
-function normalizePlayers(value: unknown): PlayerInput[] {
+interface ParsedExternalPlayer {
+  userId?: string;
+  displayName?: string;
+  rank: number;
+  rawScore: number;
+}
+
+function normalizeDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized ? normalized : undefined;
+}
+
+function normalizePlayers(value: unknown): ParsedExternalPlayer[] {
   if (!Array.isArray(value)) {
     throw new HttpError(400, "players must be an array.");
   }
@@ -110,8 +129,12 @@ function normalizePlayers(value: unknown): PlayerInput[] {
   return value.map((entry, index) => {
     const player = entry as ExternalPlayerPayload;
     const userId = typeof player.discordUserId === "string" ? player.discordUserId.trim() : typeof player.userId === "string" ? player.userId.trim() : "";
-    if (!idPattern.test(userId)) {
+    const displayName = normalizeDisplayName(player.displayName) ?? normalizeDisplayName(player.vrcName);
+    if (userId && !idPattern.test(userId)) {
       throw new HttpError(400, `players[${index}].discordUserId must be a Discord user ID.`);
+    }
+    if (!userId && !displayName) {
+      throw new HttpError(400, `players[${index}] must include discordUserId or displayName.`);
     }
     const rank = player.rank;
     const rawScore = player.rawScore;
@@ -123,9 +146,68 @@ function normalizePlayers(value: unknown): PlayerInput[] {
     }
 
     return {
-      userId,
+      userId: userId || undefined,
+      displayName,
       rank: rank as number,
       rawScore: rawScore as number
+    };
+  });
+}
+
+function normalizeNameForMatch(value: string): string {
+  return value.normalize("NFKC").trim().toLowerCase();
+}
+
+async function resolvePlayersByDisplayName(guildId: string, players: ParsedExternalPlayer[]): Promise<PlayerInput[]> {
+  const unresolvedNames = [...new Set(players.filter((player) => !player.userId).map((player) => player.displayName).filter(Boolean) as string[])];
+  if (unresolvedNames.length === 0) {
+    return players.map((player) => ({
+      userId: player.userId as string,
+      rank: player.rank,
+      rawScore: player.rawScore
+    }));
+  }
+
+  const profiles = await prisma.userProfile.findMany({
+    where: {
+      guildId
+    },
+    select: {
+      userId: true,
+      vrcName: true
+    }
+  });
+
+  const profilesByName = new Map<string, Array<{ userId: string; vrcName: string }>>();
+  for (const profile of profiles) {
+    const key = normalizeNameForMatch(profile.vrcName);
+    const current = profilesByName.get(key) ?? [];
+    current.push(profile);
+    profilesByName.set(key, current);
+  }
+
+  return players.map((player, index) => {
+    if (player.userId) {
+      return {
+        userId: player.userId,
+        rank: player.rank,
+        rawScore: player.rawScore
+      };
+    }
+
+    const displayName = player.displayName as string;
+    const matches = profilesByName.get(normalizeNameForMatch(displayName)) ?? [];
+    if (matches.length === 0) {
+      throw new HttpError(400, `players[${index}].displayName is not registered in this guild.`);
+    }
+    if (matches.length > 1) {
+      throw new HttpError(400, `players[${index}].displayName matches multiple registered users.`);
+    }
+
+    return {
+      userId: matches[0].userId,
+      rank: player.rank,
+      rawScore: player.rawScore
     };
   });
 }
@@ -163,11 +245,12 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   const payload = await readJson(request);
   const guildId = requireString(payload.guildId, "guildId");
   const type = normalizeType(payload.type);
-  const players = normalizePlayers(payload.players);
+  const parsedPlayers = normalizePlayers(payload.players);
   const externalSource = requireString(payload.externalSource, "externalSource");
   const externalMatchId = requireString(payload.externalMatchId, "externalMatchId");
   const tournamentName = typeof payload.tournamentName === "string" ? payload.tournamentName.trim() || undefined : undefined;
   const playedAt = parsePlayedAt(payload.playedAt);
+  const dryRun = payload.dryRun === true;
 
   if (!idPattern.test(guildId)) {
     throw new HttpError(400, "guildId must be a Discord guild ID.");
@@ -179,8 +262,40 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
     throw new HttpError(400, "externalMatchId must be 128 characters or less.");
   }
 
+  const players = await resolvePlayersByDisplayName(guildId, parsedPlayers);
   validatePlayers(type, players);
   await assertGuildMembers(client, guildId, players);
+
+  if (dryRun) {
+    const existing = await prisma.externalMatch.findUnique({
+      where: {
+        externalSource_externalMatchId: {
+          externalSource,
+          externalMatchId
+        }
+      },
+      select: {
+        matchId: true
+      }
+    });
+    sendJson(response, 200, {
+      ok: true,
+      dryRun: true,
+      duplicate: Boolean(existing),
+      existingMatchId: existing?.matchId,
+      guildId,
+      type,
+      tournamentName,
+      playedAt,
+      results: calculateResults(type, players).map((matchResult) => ({
+        userId: matchResult.userId,
+        rank: matchResult.rank,
+        rawScore: matchResult.rawScore,
+        point: matchResult.point
+      }))
+    });
+    return;
+  }
 
   const result = await createExternalMatch(guildId, type, players, tournamentName, playedAt, {
     externalSource,

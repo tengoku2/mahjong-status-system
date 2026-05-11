@@ -79,16 +79,21 @@ Content-Type: application/json
   "tournamentName": "大会名",
   "externalSource": "tanki",
   "externalMatchId": "tanki-match-001",
+  "dryRun": true,
   "players": [
-    { "discordUserId": "111111111111111111", "rank": 1, "rawScore": 39400 },
-    { "discordUserId": "222222222222222222", "rank": 2, "rawScore": 31200 },
-    { "discordUserId": "333333333333333333", "rank": 3, "rawScore": 22100 },
-    { "discordUserId": "444444444444444444", "rank": 4, "rawScore": 7300 }
+    { "displayName": "VRC_PLAYER_001", "rank": 1, "rawScore": 39400 },
+    { "displayName": "VRC_PLAYER_002", "rank": 2, "rawScore": 31200 },
+    { "displayName": "VRC_PLAYER_003", "rank": 3, "rawScore": 22100 },
+    { "displayName": "VRC_PLAYER_004", "rank": 4, "rawScore": 7300 }
   ]
 }
 ```
 
-`type` は `4`, `4p`, `3`, `3p` を受け付けます。`externalSource + externalMatchId` は重複登録防止キーです。同じキーで再送した場合は既存Matchを返し、二重登録しません。参加者が対象サーバーのメンバーではない場合は `サーバー内での対戦のみ有効です。` を返します。
+`type` は `4`, `4p`, `3`, `3p`, `4p_east`, `3p_east` を受け付けます。TANKI連携では `displayName` を送ると、Botに登録済みの `UserProfile.vrcName` と照合してDiscordユーザーへ変換します。既存の手動連携では `discordUserId` も利用できます。
+
+`dryRun: true` を付けると、名前照合、人数、順位、点数計算、サーバーメンバー確認だけを行い、DBへ登録しません。TANKI連携の初期テストではまず `dryRun: true` を使ってください。
+
+`externalSource + externalMatchId` は重複登録防止キーです。同じキーで再送した場合は既存Matchを返し、二重登録しません。参加者が対象サーバーのメンバーではない場合は `サーバー内での対戦のみ有効です。` を返します。
 
 レスポンス例:
 

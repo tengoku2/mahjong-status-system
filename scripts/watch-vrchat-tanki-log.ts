@@ -1,4 +1,4 @@
-import "dotenv/config";
+﻿import "dotenv/config";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { opendir, stat } from "node:fs/promises";
 import { EOL, homedir } from "node:os";
@@ -35,7 +35,7 @@ interface TankiLogPayload {
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`${name} is required.`);
+    throw new Error(`${name} が必要です。`);
   }
   return value;
 }
@@ -70,7 +70,7 @@ async function newestVrchatLog(): Promise<string> {
   entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
   const newest = entries[0]?.path;
   if (!newest) {
-    throw new Error(`No VRChat output_log txt file found in ${dir}`);
+    throw new Error(`VRChatのoutput_log txtファイルが見つかりません: ${dir}`);
   }
   return newest;
 }
@@ -89,14 +89,14 @@ function makeExternalMatchId(payload: TankiLogPayload): string {
 
 function normalizePayload(raw: unknown, opts: WatchOptions): TankiLogPayload {
   if (!raw || typeof raw !== "object") {
-    throw new Error("Log payload must be a JSON object.");
+    throw new Error("ログペイロードはJSONオブジェクトである必要があります。");
   }
   const payload = raw as TankiLogPayload;
   if (!payload.guildId && !opts.guildId) {
-    throw new Error("guildId is required in log payload or TANKI_GUILD_ID.");
+    throw new Error("ログペイロードまたはTANKI_GUILD_IDにguildIdが必要です。");
   }
   if (!Array.isArray(payload.players)) {
-    throw new Error("players must be an array.");
+    throw new Error("playersは配列である必要があります。");
   }
 
   return {
@@ -124,13 +124,13 @@ function validateReadyToSend(payload: TankiLogPayload, opts: WatchOptions) {
 
   if (blankPlayers.length > 0) {
     const positions = blankPlayers.join(", ");
-    throw new Error(`Skipped: player displayName is empty at positions ${positions}. Run this with actual seated players.`);
+    throw new Error(`送信をスキップしました: ${positions}番目のdisplayNameが空席です。実際に着席したプレイヤーで実行してください。`);
   }
 }
 
 async function postMatch(payload: TankiLogPayload, opts: WatchOptions) {
   if (!opts.apiKey) {
-    throw new Error("EXTERNAL_API_KEY is required unless TANKI_LOCAL_ONLY=true.");
+    throw new Error("TANKI_LOCAL_ONLY=true 以外では EXTERNAL_API_KEY が必要です。");
   }
   const response = await fetch(opts.apiUrl, {
     method: "POST",
@@ -193,8 +193,8 @@ async function watchAppendedLines(path: string, onChunkLine: (line: string) => P
 async function main() {
   const opts = options();
   const logPath = resolve(opts.logPath || (await newestVrchatLog()));
-  console.log(`Watching ${basename(logPath)} with prefix ${opts.prefix}`);
-  console.log(`Mode: ${opts.localOnly ? "localOnly" : opts.dryRun ? "dryRun" : "register"}`);
+  console.log(`監視中: ${basename(logPath)} / 接頭辞: ${opts.prefix}`);
+  console.log(`モード: ${opts.localOnly ? "localOnly" : opts.dryRun ? "dryRun" : "register"}`);
 
   const seen = new Set<string>();
   async function handleLine(line: string) {
@@ -214,13 +214,13 @@ async function main() {
       if (opts.localOnly) {
         const placeholders = placeholderPlayerPositions(payload);
         console.log(
-          `localOnly ${payload.externalMatchId}${placeholders.length > 0 ? ` placeholders=${placeholders.join(",")}` : ""}${EOL}` +
+          `localOnly ${payload.externalMatchId}${placeholders.length > 0 ? ` 空席=${placeholders.join(",")}` : ""}${EOL}` +
             JSON.stringify(payload, null, 2)
         );
         return;
       }
       const result = await postMatch(payload, opts);
-      console.log(`sent ${payload.dryRun ? "dryRun" : "register"} ${payload.externalMatchId}${EOL}${result}`);
+      console.log(`送信完了 ${payload.dryRun ? "dryRun" : "register"} ${payload.externalMatchId}${EOL}${result}`);
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
     }

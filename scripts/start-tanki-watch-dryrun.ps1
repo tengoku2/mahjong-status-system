@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$GuildId = "1499090620373929984",
   [string]$ApiUrl = "https://mjs-tengoku2-a8a007d5.koyeb.app/api/matches",
   [string]$LogPath
@@ -6,6 +6,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 if (-not $LogPath) {
   $logDir = Join-Path $env:USERPROFILE "AppData\LocalLow\VRChat\VRChat"
@@ -14,13 +16,13 @@ if (-not $LogPath) {
     Select-Object -First 1
 
   if (-not $latestLog) {
-    throw "VRChat output_log was not found in $logDir"
+    throw "VRChatのoutput_logが見つかりません: $logDir"
   }
 
   $LogPath = $latestLog.FullName
 }
 
-$secureKey = Read-Host "EXTERNAL_API_KEY" -AsSecureString
+$secureKey = Read-Host "EXTERNAL_API_KEYを入力してください" -AsSecureString
 $keyPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
 try {
   $env:EXTERNAL_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPtr)
@@ -36,7 +38,7 @@ $env:TANKI_ALLOW_PLACEHOLDER_PLAYERS = "false"
 $env:TANKI_READ_EXISTING = "false"
 $env:TANKI_LOG_PATH = $LogPath
 
-Write-Host "Watching: $LogPath"
-Write-Host "Mode: dryRun. DB registration will not happen."
+Write-Host "監視対象ログ: $LogPath"
+Write-Host "モード: dryRun。APIには送信しますが、DB登録は行いません。"
 Set-Location $repoRoot
 scripts\with-node22.cmd run tanki:watch

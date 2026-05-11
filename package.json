@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "local:smoke": "tsx scripts/smoke.ts",
+    "tanki:watch": "tsx scripts/watch-vrchat-tanki-log.ts",
     "db:deploy": "prisma migrate deploy",
     "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "prisma:generate": "prisma generate",

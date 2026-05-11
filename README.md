@@ -89,6 +89,37 @@ Content-Type: application/json
 }
 ```
 
+## TANKI Log Watcher
+
+VRChat Udonから任意の動的URLへ直接POSTする方式は制約が強いため、初期連携ではVRChatのログに許可済みの対局結果データを1行出し、ローカル補助スクリプトがBot APIへ送信します。
+
+TANKI側で半荘・東風終了時に次の形式の1行をログへ出します。TANKI内部名や内部構造は含めません。
+
+```text
+MJS_RESULT:{"type":"4","playedAt":"2026-05-11","externalMatchId":"tanki-001","players":[{"displayName":"VRC_PLAYER_001","rank":1,"rawScore":39400}]}
+```
+
+ローカル監視を起動します。初期値は `dryRun` なのでDB登録は行いません。
+
+```bat
+set TANKI_GUILD_ID=1499090620373929984
+set TANKI_DRY_RUN=true
+scripts\with-node22.cmd run tanki:watch
+```
+
+任意の環境変数:
+
+```env
+TANKI_API_URL=https://mjs-tengoku2-a8a007d5.koyeb.app/api/matches
+TANKI_GUILD_ID=DiscordサーバーID
+TANKI_DRY_RUN=true
+TANKI_LOG_PATH=C:\Users\...\AppData\LocalLow\VRChat\VRChat\output_log_....
+TANKI_LOG_PREFIX=MJS_RESULT:
+TANKI_READ_EXISTING=false
+```
+
+`dryRun` で名前照合と点数計算が通ることを確認してから、`TANKI_DRY_RUN=false` に変更します。
+
 `type` は `4`, `4p`, `3`, `3p`, `4p_east`, `3p_east` を受け付けます。TANKI連携では `displayName` を送ると、Botに登録済みの `UserProfile.vrcName` と照合してDiscordユーザーへ変換します。既存の手動連携では `discordUserId` も利用できます。
 
 `dryRun: true` を付けると、名前照合、人数、順位、点数計算、サーバーメンバー確認だけを行い、DBへ登録しません。TANKI連携の初期テストではまず `dryRun: true` を使ってください。

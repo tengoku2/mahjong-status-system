@@ -41,6 +41,7 @@ scripts\with-node22.cmd run local:smoke
 - `/mjs add`: 対局を登録
 - `/mjs stats user type period tournament_name`: 個人成績を表示
 - `/mjs log user count type`: 履歴を表示
+- `/mjs matches count type tournament_name`: サーバー内の対局一覧を表示
 - `/mjs rank type period tournament_name`: ランキングを表示
 - `/mjs best type period tournament_name`: レコードを表示
 - `/mjs del match_id`: 指定Matchを確認付きで削除

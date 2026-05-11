@@ -21,7 +21,7 @@ import { parsePlayedAtInput } from "./date-input.js";
 import { formatPeriodLabel } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, ranking, records } from "./services.js";
+import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, records } from "./services.js";
 import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -65,6 +65,11 @@ function requireGuildId(interaction: { guildId: string | null }): string {
 
 function typeOption(interaction: ChatInputCommandInteraction): MahjongType {
   return normalizeMahjongType(interaction.options.getString("type") ?? "4p");
+}
+
+function optionalTypeOption(interaction: ChatInputCommandInteraction): MahjongType | undefined {
+  const type = interaction.options.getString("type");
+  return type ? normalizeMahjongType(type) : undefined;
 }
 
 function periodOption(interaction: ChatInputCommandInteraction): Period {
@@ -287,6 +292,62 @@ async function handleHistory(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setTitle(`${typeLabel(type)} ${name} の履歴`)
         .setDescription(`種別: ${typeLabel(type)}\n${lines.join("\n") || "対局履歴がありません。"}`)
+    ]
+  });
+}
+
+async function handleMatchList(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply();
+  const guildId = requireGuildId(interaction);
+  const type = optionalTypeOption(interaction);
+  const count = interaction.options.getInteger("count") ?? 10;
+  const tournamentName = tournamentOption(interaction);
+  const matches = await listMatches(guildId, count, type, tournamentName);
+
+  if (matches.length === 0) {
+    await interaction.editReply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("対局一覧")
+          .setDescription(
+            `条件: ${type ? typeLabel(type) : "全種別"}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n対象の対局がありません。`
+          )
+      ]
+    });
+    return;
+  }
+
+  const fields = await Promise.all(
+    matches.map(async (match) => {
+      const resultLines = await Promise.all(
+        match.results.map(async (result) => {
+          const member = await fetchMember(interaction, result.userId);
+          const name = await displayName(guildId, member, result.userId);
+          return `${result.rank}位 ${name} ${result.rawScore}点 ${formatPoint(result.point)}pt`;
+        })
+      );
+      const meta = [
+        match.tournamentName ? `大会名: ${match.tournamentName}` : undefined,
+        match.externalMatch ? `外部: ${match.externalMatch.externalSource}/${match.externalMatch.externalMatchId}` : undefined
+      ].filter(Boolean);
+      const value = [...meta, ...resultLines].join("\n");
+
+      return {
+        name: `${formatDate(match.playedAt)} ${typeLabel(match.type as MahjongType)} / ${match.matchId}`,
+        value: value.length > 1024 ? `${value.slice(0, 1020)}...` : value,
+        inline: false
+      };
+    })
+  );
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("対局一覧")
+        .setDescription(
+          `条件: ${type ? typeLabel(type) : "全種別"} / 表示件数: ${matches.length}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n削除する場合は \`/mjs del match_id\` に対象IDを指定してください。`
+        )
+        .addFields(fields)
     ]
   });
 }
@@ -567,6 +628,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs rank` ランキングを表示",
     "`/mjs best` レコードを表示",
     "`/mjs log` 対局履歴を表示",
+    "`/mjs matches` 対局一覧を表示",
     "`/mjs del` 指定した対局を削除",
     "`/mjs undo` 最新対局を削除",
     "`/mjs members` VRC名の登録メンバーを表示",
@@ -599,6 +661,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleStats(interaction);
   } else if (subcommand === "log") {
     await handleHistory(interaction);
+  } else if (subcommand === "matches") {
+    await handleMatchList(interaction);
   } else if (subcommand === "rank") {
     await handleRanking(interaction);
   } else if (subcommand === "best") {

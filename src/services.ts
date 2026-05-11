@@ -304,6 +304,34 @@ export async function deleteMatch(guildId: string, matchId: string) {
   });
 }
 
+export async function listMatches(guildId: string, count: number, type?: MahjongType, tournamentName?: string) {
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  return prisma.match.findMany({
+    where: {
+      guildId,
+      type: type ? normalizeMahjongType(type) : undefined,
+      tournamentName: normalizedTournamentName
+    },
+    orderBy: [
+      {
+        playedAt: "desc"
+      },
+      {
+        createdAt: "desc"
+      }
+    ],
+    take: count,
+    include: {
+      externalMatch: true,
+      results: {
+        orderBy: {
+          rank: "asc"
+        }
+      }
+    }
+  });
+}
+
 export async function latestMatch(guildId: string) {
   return prisma.match.findFirst({
     where: {

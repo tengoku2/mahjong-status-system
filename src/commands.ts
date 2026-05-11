@@ -56,8 +56,14 @@ function addRecordUserOptions(command: SlashCommandSubcommandBuilder) {
       option.setName("player3").setDescription("3位のプレイヤー").setRequired(true)
     )
     .addUserOption((option: SlashCommandUserOption) =>
-      option.setName("player4").setDescription("4位のプレイヤー。4人半荘のみ指定").setRequired(false)
+      option.setName("player4").setDescription("4位のプレイヤー。4人麻雀のみ指定").setRequired(false)
     );
+}
+
+function addCountOption(command: SlashCommandSubcommandBuilder, max = 50) {
+  return command.addIntegerOption((option: SlashCommandIntegerOption) =>
+    option.setName("count").setDescription("表示件数").setMinValue(1).setMaxValue(max)
+  );
 }
 
 export const mjsCommand = new SlashCommandBuilder()
@@ -70,11 +76,11 @@ export const mjsCommand = new SlashCommandBuilder()
     addTournamentOption(addPeriodOption(addTypeOption(addUserOption(command.setName("stats").setDescription("成績を表示します")))))
   )
   .addSubcommand((command) =>
-    addTypeOption(
-      addUserOption(command.setName("log").setDescription("対局履歴を表示します")).addIntegerOption(
-        (option: SlashCommandIntegerOption) =>
-          option.setName("count").setDescription("表示件数").setMinValue(1).setMaxValue(50)
-      )
+    addTypeOption(addCountOption(addUserOption(command.setName("log").setDescription("ユーザー別の対局履歴を表示します"))))
+  )
+  .addSubcommand((command) =>
+    addTournamentOption(
+      addTypeOption(addCountOption(command.setName("matches").setDescription("サーバー内の対局一覧を表示します"), 25))
     )
   )
   .addSubcommand((command) =>
@@ -95,7 +101,7 @@ export const mjsCommand = new SlashCommandBuilder()
   .addSubcommand((command) =>
     command
       .setName("name")
-      .setDescription("管理者、または開発者がDiscordユーザーとVRC名を紐づけます")
+      .setDescription("管理者、または開発者がDiscordユーザーとVRC名を紐付けます")
       .addUserOption((option: SlashCommandUserOption) =>
         option.setName("user").setDescription("対象のサーバーメンバー").setRequired(true)
       )

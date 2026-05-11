@@ -7,10 +7,12 @@ import { createInterface } from "node:readline";
 
 interface WatchOptions {
   apiUrl: string;
-  apiKey: string;
+  apiKey?: string;
   guildId?: string;
   logPath?: string;
   dryRun: boolean;
+  localOnly: boolean;
+  allowPlaceholderPlayers: boolean;
   prefix: string;
   pollMs: number;
 }
@@ -39,12 +41,15 @@ function requireEnv(name: string): string {
 }
 
 function options(): WatchOptions {
+  const localOnly = (process.env.TANKI_LOCAL_ONLY ?? "false").toLowerCase() === "true";
   return {
     apiUrl: process.env.TANKI_API_URL?.trim() || "https://mjs-tengoku2-a8a007d5.koyeb.app/api/matches",
-    apiKey: requireEnv("EXTERNAL_API_KEY"),
+    apiKey: localOnly ? process.env.EXTERNAL_API_KEY?.trim() : requireEnv("EXTERNAL_API_KEY"),
     guildId: process.env.TANKI_GUILD_ID?.trim() || process.env.DISCORD_GUILD_ID?.trim(),
     logPath: process.env.TANKI_LOG_PATH?.trim(),
     dryRun: (process.env.TANKI_DRY_RUN ?? "true").toLowerCase() !== "false",
+    localOnly,
+    allowPlaceholderPlayers: (process.env.TANKI_ALLOW_PLACEHOLDER_PLAYERS ?? "false").toLowerCase() === "true",
     prefix: process.env.TANKI_LOG_PREFIX?.trim() || "MJS_RESULT:",
     pollMs: Number(process.env.TANKI_POLL_MS ?? 1000)
   };
@@ -103,7 +108,30 @@ function normalizePayload(raw: unknown, opts: WatchOptions): TankiLogPayload {
   };
 }
 
+function placeholderPlayerPositions(payload: TankiLogPayload): number[] {
+  return payload.players
+    .map((player, index) => ({ index, name: player.displayName?.trim() ?? "" }))
+    .filter((player) => !player.name || player.name === "-")
+    .map((player) => player.index + 1);
+}
+
+function validateReadyToSend(payload: TankiLogPayload, opts: WatchOptions) {
+  if (opts.localOnly && opts.allowPlaceholderPlayers) {
+    return;
+  }
+
+  const blankPlayers = placeholderPlayerPositions(payload);
+
+  if (blankPlayers.length > 0) {
+    const positions = blankPlayers.join(", ");
+    throw new Error(`Skipped: player displayName is empty at positions ${positions}. Run this with actual seated players.`);
+  }
+}
+
 async function postMatch(payload: TankiLogPayload, opts: WatchOptions) {
+  if (!opts.apiKey) {
+    throw new Error("EXTERNAL_API_KEY is required unless TANKI_LOCAL_ONLY=true.");
+  }
   const response = await fetch(opts.apiUrl, {
     method: "POST",
     headers: {
@@ -166,7 +194,7 @@ async function main() {
   const opts = options();
   const logPath = resolve(opts.logPath || (await newestVrchatLog()));
   console.log(`Watching ${basename(logPath)} with prefix ${opts.prefix}`);
-  console.log(`Mode: ${opts.dryRun ? "dryRun" : "register"}`);
+  console.log(`Mode: ${opts.localOnly ? "localOnly" : opts.dryRun ? "dryRun" : "register"}`);
 
   const seen = new Set<string>();
   async function handleLine(line: string) {
@@ -182,6 +210,15 @@ async function main() {
 
     try {
       const payload = normalizePayload(JSON.parse(jsonText), opts);
+      validateReadyToSend(payload, opts);
+      if (opts.localOnly) {
+        const placeholders = placeholderPlayerPositions(payload);
+        console.log(
+          `localOnly ${payload.externalMatchId}${placeholders.length > 0 ? ` placeholders=${placeholders.join(",")}` : ""}${EOL}` +
+            JSON.stringify(payload, null, 2)
+        );
+        return;
+      }
       const result = await postMatch(payload, opts);
       console.log(`sent ${payload.dryRun ? "dryRun" : "register"} ${payload.externalMatchId}${EOL}${result}`);
     } catch (error) {

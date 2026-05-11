@@ -116,6 +116,17 @@ TANKI_DRY_RUN=true
 TANKI_LOG_PATH=C:\Users\...\AppData\LocalLow\VRChat\VRChat\output_log_....
 TANKI_LOG_PREFIX=MJS_RESULT:
 TANKI_READ_EXISTING=false
+TANKI_LOCAL_ONLY=false
+TANKI_ALLOW_PLACEHOLDER_PLAYERS=false
+```
+
+1人だけでVRChatログの読み取りを確認する場合は、APIへ送信しないローカル検証モードを使います。このモードでは `EXTERNAL_API_KEY` は不要で、空席の `-` が含まれていても読み取ったJSONだけを表示します。
+
+```bat
+set TANKI_LOCAL_ONLY=true
+set TANKI_ALLOW_PLACEHOLDER_PLAYERS=true
+set TANKI_READ_EXISTING=true
+scripts\with-node22.cmd run tanki:watch
 ```
 
 `dryRun` で名前照合と点数計算が通ることを確認してから、`TANKI_DRY_RUN=false` に変更します。

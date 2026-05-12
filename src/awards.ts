@@ -37,17 +37,51 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-function resolveMvpTie(results: RecordInput[], tiedUserIds: string[]): string[] {
+function resolveMvpTie(results: RecordInput[], tiedUserIds: string[], averageRankByUser: Map<string, number>): string[] {
   if (tiedUserIds.length <= 1) {
     return tiedUserIds;
   }
 
+  const averageRankTiebreak = selectLowest(
+    tiedUserIds.map((userId) => ({
+      userId,
+      value: averageRankByUser.get(userId) ?? Number.POSITIVE_INFINITY
+    }))
+  ).map((entry) => entry.userId);
+
+  if (averageRankTiebreak.length === 1) {
+    return averageRankTiebreak;
+  }
+
+  tiedUserIds = averageRankTiebreak;
   const tieSet = new Set(tiedUserIds);
   const matches = new Map<string, RecordInput[]>();
   for (const result of results) {
     const list = matches.get(result.match.matchId) ?? [];
     list.push(result);
     matches.set(result.match.matchId, list);
+  }
+
+  if (tiedUserIds.length >= 3) {
+    const comparedPairs = new Set<string>();
+    for (const matchResults of matches.values()) {
+      const tiedResults = matchResults.filter((result) => tieSet.has(result.userId));
+      for (let i = 0; i < tiedResults.length; i += 1) {
+        for (let j = i + 1; j < tiedResults.length; j += 1) {
+          const pair = [tiedResults[i].userId, tiedResults[j].userId].sort().join(":");
+          comparedPairs.add(pair);
+        }
+      }
+    }
+
+    for (let i = 0; i < tiedUserIds.length; i += 1) {
+      for (let j = i + 1; j < tiedUserIds.length; j += 1) {
+        const pair = [tiedUserIds[i], tiedUserIds[j]].sort().join(":");
+        if (!comparedPairs.has(pair)) {
+          return tiedUserIds;
+        }
+      }
+    }
   }
 
   const headToHead = new Map<string, number[]>();
@@ -130,9 +164,12 @@ export function calculateSeasonAwards(results: RecordInput[], minGames = 5): Sea
   }
 
   const eligibleGames = new Map<string, number>(eligibleUsers.map((userId) => [userId, gamesByUser.get(userId) ?? 0]));
+  const averageRankByUser = new Map(
+    eligibleUsers.map((userId) => [userId, (rankSumByUser.get(userId) ?? 0) / (gamesByUser.get(userId) ?? 1)])
+  );
   const mvpCandidates = eligibleUsers.map((userId) => ({ userId, value: pointByUser.get(userId) ?? 0 }));
   const rawMvp = selectHighest(mvpCandidates);
-  const resolvedMvpIds = resolveMvpTie(eligibleResults, rawMvp.map((entry) => entry.userId));
+  const resolvedMvpIds = resolveMvpTie(eligibleResults, rawMvp.map((entry) => entry.userId), averageRankByUser);
   const mvp = rawMvp.filter((entry) => resolvedMvpIds.includes(entry.userId));
 
   return {
@@ -143,7 +180,7 @@ export function calculateSeasonAwards(results: RecordInput[], minGames = 5): Sea
     stabilityPrize: selectLowest(
       eligibleUsers.map((userId) => ({
         userId,
-        value: (rankSumByUser.get(userId) ?? 0) / (gamesByUser.get(userId) ?? 1)
+        value: averageRankByUser.get(userId) ?? 0
       }))
     ),
     highestScorePrize: selectHighest(eligibleUsers.map((userId) => ({ userId, value: highScoreByUser.get(userId) ?? 0 }))),

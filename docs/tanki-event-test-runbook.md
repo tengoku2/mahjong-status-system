@@ -4,6 +4,8 @@
 
 TANKI本体、Prefab、改造済みTANKIファイル、内部コードは配布しません。このリポジトリに含めるのはDiscord Bot側とローカル監視ツールだけです。
 
+検証協力者へ渡す場合は、先に [tanki-tester-manual.md](tanki-tester-manual.md) を共有してください。
+
 ## 確認する経路
 
 ```text

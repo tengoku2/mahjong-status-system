@@ -100,6 +100,8 @@ Content-Type: application/json
 
 イベント当日のdryRun/本登録手順: [docs/tanki-event-test-runbook.md](docs/tanki-event-test-runbook.md)
 
+検証協力者へ渡すマニュアル: [docs/tanki-tester-manual.md](docs/tanki-tester-manual.md)
+
 VRChat Udonから任意の動的URLへ直接POSTする方式は制約が強いため、初期連携ではVRChatのログに許可済みの対局結果データを1行出し、ローカル補助スクリプトがBot APIへ送信します。
 
 TANKI側で半荘・東風終了時に次の形式の1行をログへ出します。TANKI内部名や内部構造は含めません。

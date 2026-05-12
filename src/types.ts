@@ -11,6 +11,8 @@ export type Period =
   | "year"
   | "all";
 
+export type SeasonCode = "ranoh" | "chikuoh" | "kikuoh" | "baioh";
+
 export interface PlayerInput {
   userId: string;
   rank: number;

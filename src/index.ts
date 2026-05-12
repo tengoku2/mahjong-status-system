@@ -15,15 +15,16 @@ import {
   type ModalSubmitInteraction
 } from "discord.js";
 import { createApiServer } from "./external-api.js";
+import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
 import { parsePlayedAtInput } from "./date-input.js";
-import { formatPeriodLabel } from "./periods.js";
+import { currentSeason, formatPeriodLabel, formatSeasonLabel, seasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, records } from "./services.js";
+import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
 import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
-import type { MahjongType, Period, PlayerInput } from "./types.js";
+import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -80,6 +81,44 @@ function rankingPeriodOption(interaction: ChatInputCommandInteraction): Period {
   return (interaction.options.getString("period") ?? "month") as Period;
 }
 
+function seasonCodeOption(interaction: ChatInputCommandInteraction): SeasonCode | undefined {
+  const season = interaction.options.getString("season");
+  return season ? (season as SeasonCode) : undefined;
+}
+
+function resolveSeasonOption(interaction: ChatInputCommandInteraction) {
+  const code = seasonCodeOption(interaction);
+  const seasonYear = interaction.options.getInteger("season_year");
+  if ((code && !seasonYear) || (!code && seasonYear)) {
+    throw new Error("過去シーズンを指定する場合は season と season_year を両方指定してください。");
+  }
+  return code && seasonYear ? seasonWindow(code, seasonYear) : currentSeason();
+}
+
+function resolveLeaderboardWindow(interaction: ChatInputCommandInteraction) {
+  const seasonRequested = Boolean(seasonCodeOption(interaction) || interaction.options.getInteger("season_year"));
+  const rawPeriod = interaction.options.getString("period");
+  if (seasonRequested && rawPeriod) {
+    throw new Error("season 指定時は period を同時に指定できません。");
+  }
+  if (seasonRequested) {
+    return {
+      season: resolveSeasonOption(interaction),
+      period: null
+    };
+  }
+  if (rawPeriod) {
+    return {
+      season: null,
+      period: rawPeriod as Period
+    };
+  }
+  return {
+    season: currentSeason(),
+    period: null
+  };
+}
+
 function tournamentOption(interaction: ChatInputCommandInteraction): string | undefined {
   const tournamentName = interaction.options.getString("tournament_name")?.trim();
   return tournamentName || undefined;
@@ -119,6 +158,14 @@ async function summarizeRecordList<T>(
   const visible = await Promise.all(entries.slice(0, 3).map(formatEntry));
   const hidden = entries.length - visible.length;
   return hidden > 0 ? `${visible.join("\n")}\n他${hidden}${hiddenUnit}` : visible.join("\n");
+}
+
+async function summarizeAwardList(
+  entries: AwardSummary[],
+  formatEntry: (entry: AwardSummary) => Promise<string>,
+  empty: string
+): Promise<string> {
+  return summarizeRecordList(entries, formatEntry, empty, "名");
 }
 
 async function fetchMember(interaction: { guild: ChatInputCommandInteraction["guild"] }, userId: string): Promise<GuildMember | null> {
@@ -356,9 +403,11 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
   const type = typeOption(interaction);
-  const period = rankingPeriodOption(interaction);
+  const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
-  const entries = await ranking(guildId, type, period, tournamentName);
+  const entries = season
+    ? await rankingForDateRange(guildId, type, season.start, season.end, tournamentName)
+    : await ranking(guildId, type, period!, tournamentName);
   const lines = await Promise.all(
     entries.slice(0, 20).map(async (entry, index) => {
       const member = await fetchMember(interaction, entry.userId);
@@ -372,9 +421,11 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${typeLabel(type)} ポイントランキング`)
+        .setTitle(`${typeLabel(type)} ポイントランキング ${season ? formatSeasonLabel(season) : formatPeriodLabel(period!)}`)
         .setDescription(
-          `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n${
+          `種別: ${typeLabel(type)} / ${season ? `シーズン: ${formatSeasonLabel(season)}` : `期間: ${formatPeriodLabel(period!)}`}${
+            tournamentName ? ` / 大会名: ${tournamentName}` : ""
+          }\n${
             lines.join("\n") || "集計対象がありません。"
           }`
         )
@@ -386,9 +437,11 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
   const type = typeOption(interaction);
-  const period = rankingPeriodOption(interaction);
+  const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
-  const currentRecords = await records(guildId, type, period, tournamentName);
+  const currentRecords = season
+    ? await recordsForDateRange(guildId, type, season.start, season.end, tournamentName)
+    : await records(guildId, type, period!, tournamentName);
   const nameCache = new Map<string, string>();
   const nameFor = async (userId: string) => {
     const cached = nameCache.get(userId);
@@ -457,7 +510,9 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setTitle(`${typeLabel(type)} レコード`)
         .setDescription(
-          `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n対象対局数: ${
+          `種別: ${typeLabel(type)} / ${season ? `シーズン: ${formatSeasonLabel(season)}` : `期間: ${formatPeriodLabel(period!)}`}${
+            tournamentName ? ` / 大会名: ${tournamentName}` : ""
+          }\n対象対局数: ${
             currentRecords.totalMatches
           }`
         )
@@ -470,6 +525,76 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
           { name: `最高平均順位 (${currentRecords.qualifiedMinGames}戦以上)`, value: bestAverageRank, inline: true },
           { name: "連続トップ", value: topStreak, inline: true },
           { name: "連続ラス回避", value: noLastStreak, inline: true }
+        )
+    ]
+  });
+}
+
+async function handleAwards(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply();
+  const guildId = requireGuildId(interaction);
+  const season = resolveSeasonOption(interaction);
+  const awards = await seasonAwards(guildId, season.start, season.end);
+  const nameCache = new Map<string, string>();
+  const nameFor = async (userId: string) => {
+    const cached = nameCache.get(userId);
+    if (cached) {
+      return cached;
+    }
+    const name = await displayName(guildId, await fetchMember(interaction, userId), userId);
+    nameCache.set(userId, name);
+    return name;
+  };
+
+  const mvp = await summarizeAwardList(
+    awards.mvp,
+    async (entry) => `${await nameFor(entry.userId)} ${formatPoint(entry.value)}pt`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+  const topPrize = await summarizeAwardList(
+    awards.topPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}回`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+  const stabilityPrize = await summarizeAwardList(
+    awards.stabilityPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(2)}位`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+  const highestScorePrize = await summarizeAwardList(
+    awards.highestScorePrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}点`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+  const topStreakPrize = await summarizeAwardList(
+    awards.topStreakPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}連続`,
+    "2連続以上の記録なし"
+  );
+  const noLastStreakPrize = await summarizeAwardList(
+    awards.noLastStreakPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}連続`,
+    "2連続以上の記録なし"
+  );
+  const participationPrize = await summarizeAwardList(
+    awards.participationPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}戦`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle(`白鳳会 シーズン表彰 ${formatSeasonLabel(season)}`)
+        .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 参加条件: ${awards.minGames}戦以上`)
+        .addFields(
+          { name: "MVP", value: mvp, inline: false },
+          { name: "トップ賞", value: topPrize, inline: true },
+          { name: "安定賞", value: stabilityPrize, inline: true },
+          { name: "最高スコア賞", value: highestScorePrize, inline: true },
+          { name: "連続トップ賞", value: topStreakPrize, inline: true },
+          { name: "連続ラス回避賞", value: noLastStreakPrize, inline: true },
+          { name: "最多対局賞", value: participationPrize, inline: true }
         )
     ]
   });
@@ -627,6 +752,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs stats` 個人成績を表示",
     "`/mjs rank` ランキングを表示",
     "`/mjs best` レコードを表示",
+    "`/mjs awards` シーズン表彰を表示",
     "`/mjs log` 対局履歴を表示",
     "`/mjs matches` 対局一覧を表示",
     "`/mjs del` 指定した対局を削除",
@@ -667,6 +793,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleRanking(interaction);
   } else if (subcommand === "best") {
     await handleRecords(interaction);
+  } else if (subcommand === "awards") {
+    await handleAwards(interaction);
   } else if (subcommand === "del") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {

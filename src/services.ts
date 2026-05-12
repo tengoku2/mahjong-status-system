@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { calculateSeasonAwards } from "./awards.js";
 import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { calendarStart, recentLimit } from "./periods.js";
@@ -205,27 +206,38 @@ async function periodMatchIds(
   return matches.map((match) => match.matchId);
 }
 
-export async function getResultsForPeriod(
-  guildId: string,
-  type: MahjongType,
-  period: Period,
-  userId?: string,
-  tournamentName?: string
-) {
-  const normalizedTournamentName = normalizeTournamentName(tournamentName);
-  const normalizedType = normalizeMahjongType(type);
-  const matchIds = await periodMatchIds(guildId, type, period, userId, normalizedTournamentName);
-  const start = calendarStart(period);
+interface ResultQueryOptions {
+  guildId: string;
+  types: MahjongType[];
+  userId?: string;
+  tournamentName?: string;
+  playedAtStart?: Date;
+  playedAtEnd?: Date;
+  matchIds?: string[] | null;
+  excludeTournamentMatches?: boolean;
+}
+
+async function getResultsByOptions(options: ResultQueryOptions) {
+  const normalizedTournamentName = normalizeTournamentName(options.tournamentName);
 
   return prisma.result.findMany({
     where: {
-      userId,
+      userId: options.userId,
       match: {
-        guildId,
-        type: normalizedType,
-        tournamentName: normalizedTournamentName,
-        matchId: matchIds ? { in: matchIds } : undefined,
-        playedAt: start ? { gte: start } : undefined
+        guildId: options.guildId,
+        type: { in: options.types.map((type) => normalizeMahjongType(type)) },
+        tournamentName:
+          options.excludeTournamentMatches
+            ? null
+            : normalizedTournamentName,
+        matchId: options.matchIds ? { in: options.matchIds } : undefined,
+        playedAt:
+          options.playedAtStart || options.playedAtEnd
+            ? {
+                gte: options.playedAtStart,
+                lt: options.playedAtEnd
+              }
+            : undefined
       }
     },
     include: {
@@ -236,6 +248,46 @@ export async function getResultsForPeriod(
         playedAt: "desc"
       }
     }
+  });
+}
+
+export async function getResultsForPeriod(
+  guildId: string,
+  type: MahjongType,
+  period: Period,
+  userId?: string,
+  tournamentName?: string
+) {
+  const normalizedType = normalizeMahjongType(type);
+  const matchIds = await periodMatchIds(guildId, type, period, userId, tournamentName);
+  const start = calendarStart(period);
+  return getResultsByOptions({
+    guildId,
+    types: [normalizedType],
+    userId,
+    tournamentName,
+    playedAtStart: start ?? undefined,
+    matchIds
+  });
+}
+
+export async function getResultsForDateRange(
+  guildId: string,
+  types: MahjongType[],
+  start: Date,
+  end: Date,
+  userId?: string,
+  tournamentName?: string,
+  excludeTournamentMatches = false
+) {
+  return getResultsByOptions({
+    guildId,
+    types,
+    userId,
+    tournamentName,
+    playedAtStart: start,
+    playedAtEnd: end,
+    excludeTournamentMatches
   });
 }
 
@@ -265,6 +317,10 @@ export async function aggregateStats(guildId: string, type: MahjongType, period:
 
 export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
+  return buildRankingFromResults(results);
+}
+
+function buildRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriod>>) {
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
   for (const result of results) {
@@ -289,10 +345,38 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
     .sort((a, b) => b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId));
 }
 
+export async function rankingForDateRange(
+  guildId: string,
+  type: MahjongType,
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const results = await getResultsForDateRange(guildId, [type], start, end, undefined, tournamentName);
+  return buildRankingFromResults(results);
+}
+
 export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
   const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
   return calculateRecords(normalizedType, results);
+}
+
+export async function recordsForDateRange(
+  guildId: string,
+  type: MahjongType,
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const normalizedType = normalizeMahjongType(type);
+  const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName);
+  return calculateRecords(normalizedType, results);
+}
+
+export async function seasonAwards(guildId: string, start: Date, end: Date) {
+  const results = await getResultsForDateRange(guildId, ["3p", "4p"], start, end, undefined, undefined, true);
+  return calculateSeasonAwards(results);
 }
 
 export async function deleteMatch(guildId: string, matchId: string) {

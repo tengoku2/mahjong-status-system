@@ -5,7 +5,7 @@ import {
   SlashCommandSubcommandBuilder,
   SlashCommandUserOption
 } from "discord.js";
-import { periodChoices } from "./periods.js";
+import { periodChoices, seasonChoices } from "./periods.js";
 
 const typeChoices = [
   { name: "4人半荘", value: "4p" },
@@ -29,6 +29,18 @@ function addTypeOption(command: SlashCommandSubcommandBuilder, required = false)
 function addPeriodOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addStringOption((option: SlashCommandStringOption) =>
     option.setName("period").setDescription("集計期間").setRequired(required).addChoices(...periodChoices)
+  );
+}
+
+function addSeasonOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("season").setDescription("シーズン").setRequired(required).addChoices(...seasonChoices)
+  );
+}
+
+function addSeasonYearOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addIntegerOption((option: SlashCommandIntegerOption) =>
+    option.setName("season_year").setDescription("シーズン年。例: 26").setRequired(required).setMinValue(1).setMaxValue(99)
   );
 }
 
@@ -84,10 +96,13 @@ export const mjsCommand = new SlashCommandBuilder()
     )
   )
   .addSubcommand((command) =>
-    addTournamentOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))
+    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("レコードを表示します"))))
+    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("レコードを表示します"))))))
+  )
+  .addSubcommand((command) =>
+    addSeasonYearOption(addSeasonOption(command.setName("awards").setDescription("シーズン表彰を表示します")))
   )
   .addSubcommand((command) =>
     command

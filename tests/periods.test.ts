@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarStart, formatPeriodLabel, recentLimit } from "../src/periods.js";
+import { calendarStart, currentSeason, formatPeriodLabel, formatSeasonLabel, recentLimit, seasonWindow } from "../src/periods.js";
 
 describe("periods", () => {
   it("returns recent limits", () => {
@@ -20,5 +20,17 @@ describe("periods", () => {
     const now = new Date(2026, 4, 7, 12, 0, 0);
     expect(formatPeriodLabel("month", now)).toBe("2026年05月");
     expect(formatPeriodLabel("all", now)).toBe("累計");
+  });
+
+  it("builds season windows on a spring-based cycle", () => {
+    const season = currentSeason(new Date(2026, 4, 12, 12, 0, 0));
+    expect(formatSeasonLabel(season)).toBe("蘭鳳季 26シーズン");
+    expect(season.start.toISOString()).toBe(new Date(2026, 2, 1).toISOString());
+    expect(season.end.toISOString()).toBe(new Date(2026, 5, 1).toISOString());
+
+    const winter = seasonWindow("baioh", 26);
+    expect(formatSeasonLabel(winter)).toBe("梅鳳季 26シーズン");
+    expect(winter.start.toISOString()).toBe(new Date(2026, 11, 1).toISOString());
+    expect(winter.end.toISOString()).toBe(new Date(2027, 2, 1).toISOString());
   });
 });

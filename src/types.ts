@@ -5,6 +5,8 @@ export type Period =
   | "recent_10"
   | "recent_50"
   | "recent_100"
+  | "current_season"
+  | "previous_season"
   | "month"
   | "three_months"
   | "half_year"

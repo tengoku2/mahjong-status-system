@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { calculateSeasonAwards } from "./awards.js";
 import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
-import { calendarStart, recentLimit } from "./periods.js";
+import { periodDateRange, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
 import type { MahjongType, Period, PlayerInput } from "./types.js";
 
@@ -260,13 +260,14 @@ export async function getResultsForPeriod(
 ) {
   const normalizedType = normalizeMahjongType(type);
   const matchIds = await periodMatchIds(guildId, type, period, userId, tournamentName);
-  const start = calendarStart(period);
+  const dateRange = periodDateRange(period);
   return getResultsByOptions({
     guildId,
     types: [normalizedType],
     userId,
     tournamentName,
-    playedAtStart: start ?? undefined,
+    playedAtStart: dateRange?.start,
+    playedAtEnd: dateRange?.end,
     matchIds
   });
 }

@@ -13,6 +13,8 @@ export const periodChoices = [
   { name: "直近10戦", value: "recent_10" },
   { name: "直近50戦", value: "recent_50" },
   { name: "直近100戦", value: "recent_100" },
+  { name: "今シーズン", value: "current_season" },
+  { name: "前シーズン", value: "previous_season" },
   { name: "当月", value: "month" },
   { name: "3ヶ月", value: "three_months" },
   { name: "半年", value: "half_year" },
@@ -32,6 +34,8 @@ export const periodLabels: Record<Period, string> = {
   recent_10: "直近10戦",
   recent_50: "直近50戦",
   recent_100: "直近100戦",
+  current_season: "今シーズン",
+  previous_season: "前シーズン",
   month: "当月",
   three_months: "3ヶ月",
   half_year: "半年",
@@ -47,6 +51,14 @@ const seasonMetadata: Record<SeasonCode, { label: string; startMonth: number }> 
 };
 
 export function formatPeriodLabel(period: Period, now = new Date()): string {
+  if (period === "current_season") {
+    return `今シーズン (${formatSeasonLabel(currentSeason(now))})`;
+  }
+
+  if (period === "previous_season") {
+    return `前シーズン (${formatSeasonLabel(previousSeason(now))})`;
+  }
+
   if (period === "month") {
     const month = `${now.getMonth() + 1}`.padStart(2, "0");
     return `${now.getFullYear()}年${month}月`;
@@ -93,6 +105,35 @@ export function currentSeason(now = new Date()): SeasonWindow {
 
   const seasonYear = month >= 11 ? now.getFullYear() - 2000 : now.getFullYear() - 2001;
   return seasonWindow("baioh", seasonYear);
+}
+
+export function previousSeason(now = new Date()): SeasonWindow {
+  const current = currentSeason(now);
+  if (current.code === "ranoh") {
+    return seasonWindow("baioh", current.seasonYear - 1);
+  }
+  if (current.code === "chikuoh") {
+    return seasonWindow("ranoh", current.seasonYear);
+  }
+  if (current.code === "kikuoh") {
+    return seasonWindow("chikuoh", current.seasonYear);
+  }
+  return seasonWindow("kikuoh", current.seasonYear);
+}
+
+export function periodDateRange(period: Period, now = new Date()): { start?: Date; end?: Date } | null {
+  if (period === "current_season") {
+    const season = currentSeason(now);
+    return { start: season.start, end: season.end };
+  }
+
+  if (period === "previous_season") {
+    const season = previousSeason(now);
+    return { start: season.start, end: season.end };
+  }
+
+  const start = calendarStart(period, now);
+  return start ? { start } : null;
 }
 
 export function seasonWindow(code: SeasonCode, seasonYear: number): SeasonWindow {

@@ -19,7 +19,7 @@ import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
 import { parsePlayedAtInput } from "./date-input.js";
-import { currentSeason, formatPeriodLabel, formatSeasonLabel, seasonWindow } from "./periods.js";
+import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, seasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
@@ -108,9 +108,22 @@ function resolveLeaderboardWindow(interaction: ChatInputCommandInteraction) {
     };
   }
   if (rawPeriod) {
+    const period = rawPeriod as Period;
+    if (period === "current_season") {
+      return {
+        season: currentSeason(),
+        period: null
+      };
+    }
+    if (period === "previous_season") {
+      return {
+        season: previousSeason(),
+        period: null
+      };
+    }
     return {
       season: null,
-      period: rawPeriod as Period
+      period
     };
   }
   return {

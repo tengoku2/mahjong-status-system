@@ -11,7 +11,7 @@ export function movementSymbol(movement: RankMovement): string {
     same: "→",
     down_near: "↘",
     down_far: "↓",
-    new: "NEW"
+    new: "[new]"
   };
   return symbols[movement];
 }

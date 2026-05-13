@@ -32,6 +32,6 @@ describe("rank movement", () => {
     expect(movements.get("d")).toBe("up_far");
     expect(movements.get("a")).toBe("down_far");
     expect(movements.get("c")).toBe("down_near");
-    expect(movementSymbol("new")).toBe("NEW");
+    expect(movementSymbol("new")).toBe("[new]");
   });
 });

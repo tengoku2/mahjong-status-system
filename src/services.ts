@@ -11,6 +11,15 @@ export interface ExternalMatchIdentity {
   externalMatchId: string;
 }
 
+export interface RankingEntry {
+  userId: string;
+  games: number;
+  totalPoint: number;
+  rankSum: number;
+  averageRank: number;
+  averagePoint: number;
+}
+
 const transactionOptions = {
   maxWait: 10_000,
   timeout: 20_000
@@ -321,7 +330,7 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
   return buildRankingFromResults(results);
 }
 
-function buildRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriod>>) {
+export function buildRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriod>>): RankingEntry[] {
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
   for (const result of results) {
@@ -355,6 +364,56 @@ export async function rankingForDateRange(
 ) {
   const results = await getResultsForDateRange(guildId, [type], start, end, undefined, tournamentName);
   return buildRankingFromResults(results);
+}
+
+export async function rankingWithLatestMatchDeltaForDateRange(
+  guildId: string,
+  type: MahjongType,
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const normalizedType = normalizeMahjongType(type);
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const latestMatch = await prisma.match.findFirst({
+    where: {
+      guildId,
+      type: normalizedType,
+      tournamentName: normalizedTournamentName,
+      playedAt: {
+        gte: start,
+        lt: end
+      }
+    },
+    orderBy: [
+      {
+        playedAt: "desc"
+      },
+      {
+        createdAt: "desc"
+      }
+    ],
+    select: {
+      matchId: true
+    }
+  });
+
+  const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName);
+  const current = buildRankingFromResults(results);
+  if (!latestMatch) {
+    return {
+      current,
+      previous: [],
+      latestMatchId: null
+    };
+  }
+
+  const previous = buildRankingFromResults(results.filter((result) => result.match.matchId !== latestMatch.matchId));
+  return {
+    current,
+    previous,
+    latestMatchId: latestMatch.matchId
+  };
 }
 
 export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {

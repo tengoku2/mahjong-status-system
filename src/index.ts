@@ -21,8 +21,9 @@ import { recordModal } from "./modals.js";
 import { parsePlayedAtInput } from "./date-input.js";
 import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, seasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
+import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
+import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, rankingWithLatestMatchDeltaForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
 import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -130,6 +131,14 @@ function resolveLeaderboardWindow(interaction: ChatInputCommandInteraction) {
     season: currentSeason(),
     period: null
   };
+}
+
+function isCurrentSeasonWindow(season: { code: SeasonCode; seasonYear: number } | null): boolean {
+  if (!season) {
+    return false;
+  }
+  const current = currentSeason();
+  return current.code === season.code && current.seasonYear === season.seasonYear;
 }
 
 function tournamentOption(interaction: ChatInputCommandInteraction): string | undefined {
@@ -418,14 +427,27 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const type = typeOption(interaction);
   const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
-  const entries = season
-    ? await rankingForDateRange(guildId, type, season.start, season.end, tournamentName)
-    : await ranking(guildId, type, period!, tournamentName);
+  const showMovement = Boolean(season && isCurrentSeasonWindow(season));
+  const rankingData = season
+    ? showMovement
+      ? await rankingWithLatestMatchDeltaForDateRange(guildId, type, season.start, season.end, tournamentName)
+      : {
+          current: await rankingForDateRange(guildId, type, season.start, season.end, tournamentName),
+          previous: [],
+          latestMatchId: null
+        }
+    : {
+        current: await ranking(guildId, type, period!, tournamentName),
+        previous: [],
+        latestMatchId: null
+      };
+  const movements = showMovement ? calculateRankMovements(rankingData.current, rankingData.previous, true) : new Map();
   const lines = await Promise.all(
-    entries.slice(0, 20).map(async (entry, index) => {
+    rankingData.current.slice(0, 20).map(async (entry, index) => {
       const member = await fetchMember(interaction, entry.userId);
       const name = await displayName(guildId, member, entry.userId);
-      return `${index + 1}. ${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}戦 / 平均${formatPoint(
+      const movement = showMovement ? `${movementSymbol(movements.get(entry.userId) ?? "same")} ` : "";
+      return `${index + 1}. ${movement}${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}戦 / 平均${formatPoint(
         entry.averagePoint
       )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
     })

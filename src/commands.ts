@@ -22,7 +22,7 @@ function addUserOption(command: SlashCommandSubcommandBuilder, required = false)
 
 function addTypeOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addStringOption((option: SlashCommandStringOption) =>
-    option.setName("type").setDescription("種別").setRequired(required).addChoices(...typeChoices)
+    option.setName("type").setDescription("対局種別").setRequired(required).addChoices(...typeChoices)
   );
 }
 
@@ -52,7 +52,7 @@ function addTournamentOption(command: SlashCommandSubcommandBuilder, required = 
 
 function addDateOption(command: SlashCommandSubcommandBuilder) {
   return command.addStringOption((option: SlashCommandStringOption) =>
-    option.setName("date").setDescription("対局日。例: 5/5, 0505, 昨日, 2026-05-07").setRequired(true).setMaxLength(20)
+    option.setName("date").setDescription("対局日。例: 5/5, 0505, 今日, 2026-05-07").setRequired(true).setMaxLength(20)
   );
 }
 
@@ -68,7 +68,7 @@ function addRecordUserOptions(command: SlashCommandSubcommandBuilder) {
       option.setName("player3").setDescription("3位のプレイヤー").setRequired(true)
     )
     .addUserOption((option: SlashCommandUserOption) =>
-      option.setName("player4").setDescription("4位のプレイヤー。4人麻雀のみ指定").setRequired(false)
+      option.setName("player4").setDescription("4位のプレイヤー。3人麻雀では不要").setRequired(false)
     );
 }
 
@@ -91,9 +91,7 @@ export const mjsCommand = new SlashCommandBuilder()
     addTypeOption(addCountOption(addUserOption(command.setName("log").setDescription("ユーザー別の対局履歴を表示します"))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(
-      addTypeOption(addCountOption(command.setName("matches").setDescription("サーバー内の対局一覧を表示します"), 25))
-    )
+    addTournamentOption(addTypeOption(addCountOption(command.setName("matches").setDescription("サーバー全体の対局一覧を表示します"), 25)))
   )
   .addSubcommand((command) =>
     addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))))
@@ -103,6 +101,9 @@ export const mjsCommand = new SlashCommandBuilder()
   )
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("awards").setDescription("シーズン表彰を表示します")))
+  )
+  .addSubcommand((command) =>
+    addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))
   )
   .addSubcommand((command) =>
     command
@@ -116,7 +117,7 @@ export const mjsCommand = new SlashCommandBuilder()
   .addSubcommand((command) =>
     command
       .setName("name")
-      .setDescription("管理者、または開発者がDiscordユーザーとVRC名を紐付けます")
+      .setDescription("管理者向け。DiscordユーザーとVRC名を紐づけます")
       .addUserOption((option: SlashCommandUserOption) =>
         option.setName("user").setDescription("対象のサーバーメンバー").setRequired(true)
       )

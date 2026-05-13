@@ -15,6 +15,7 @@ import {
   type ModalSubmitInteraction
 } from "discord.js";
 import { createApiServer } from "./external-api.js";
+import { buildSeasonExportBundle, csvAttachment } from "./export.js";
 import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
@@ -635,6 +636,21 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
   });
 }
 
+async function handleExport(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  const season = resolveSeasonOption(interaction);
+  const exportBundle = await buildSeasonExportBundle(guildId, season);
+
+  await interaction.editReply({
+    content: `${formatSeasonLabel(season)} のCSVを出力しました。\nresults: ${exportBundle.resultRows.length}行\nrank_snapshots: ${exportBundle.rankSnapshotRows.length}行`,
+    files: [
+      csvAttachment(exportBundle.resultFileName, exportBundle.resultCsv),
+      csvAttachment(exportBundle.rankSnapshotFileName, exportBundle.rankSnapshotsCsv)
+    ]
+  });
+}
+
 function confirmRow(action: "del" | "undo", matchId: string) {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -788,16 +804,17 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs rank` ランキングを表示",
     "`/mjs best` レコードを表示",
     "`/mjs awards` シーズン表彰を表示",
-    "`/mjs log` 対局履歴を表示",
-    "`/mjs matches` 対局一覧を表示",
+    "`/mjs export` CSVを出力",
+    "`/mjs log` ユーザー別の対局履歴を表示",
+    "`/mjs matches` サーバー全体の対局一覧を表示",
     "`/mjs del` 指定した対局を削除",
-    "`/mjs undo` 最新対局を削除",
-    "`/mjs members` VRC名の登録メンバーを表示",
+    "`/mjs undo` 最新の対局を削除",
+    "`/mjs members` VRC名の登録一覧を表示",
     "`/mjs help` このヘルプを表示"
   ];
 
   if (canUseName) {
-    lines.splice(7, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");
+    lines.splice(8, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");
   }
 
   await interaction.editReply({
@@ -805,7 +822,9 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setTitle("MJS Help")
         .setDescription(lines.join("\n"))
-        .setFooter({ text: canUseName ? "管理者・開発者向けコマンドを含めて表示しています。" : "管理者向けコマンドは非表示です。" })
+        .setFooter({
+          text: canUseName ? "管理者向けコマンドを含めて表示しています。" : "管理者向けコマンドは非表示です。"
+        })
     ]
   });
 }
@@ -830,6 +849,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleRecords(interaction);
   } else if (subcommand === "awards") {
     await handleAwards(interaction);
+  } else if (subcommand === "export") {
+    await handleExport(interaction);
   } else if (subcommand === "del") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {

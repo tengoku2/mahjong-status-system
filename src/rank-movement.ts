@@ -8,7 +8,7 @@ export function movementSymbol(movement: RankMovement): string {
   const symbols: Record<RankMovement, string> = {
     up_far: "↑",
     up_near: "↗",
-    same: "-",
+    same: "→",
     down_near: "↘",
     down_far: "↓",
     new: "NEW"

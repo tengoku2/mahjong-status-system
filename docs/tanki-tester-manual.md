@@ -23,26 +23,30 @@
 - 当日使うモード
   - 基本は `dryRun`
   - 本登録まで担当する場合のみ `register`
+- リポジトリ配置先
+  - `D:\白鳳会\mahjong-status-system-main`
 
 ## 1. リポジトリを取得する
 
 PowerShellを開いて、作業したいフォルダへ移動してから実行します。
 
 ```powershell
-git clone https://github.com/tengoku2/mahjong-status-system
-cd mahjong-status-system
+cd "D:\白鳳会"
+git clone https://github.com/tengoku2/mahjong-status-system mahjong-status-system-main
+cd "D:\白鳳会\mahjong-status-system-main"
 ```
 
 すでに取得済みの場合は、最新版へ更新します。
 
 ```powershell
-cd mahjong-status-system
+cd "D:\白鳳会\mahjong-status-system-main"
 git pull
 ```
 
 ## 2. Node環境を準備する
 
 ```powershell
+cd "D:\白鳳会\mahjong-status-system-main"
 .\scripts\with-node22.cmd install
 ```
 

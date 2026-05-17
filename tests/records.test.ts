@@ -37,16 +37,13 @@ describe("records", () => {
 
     expect(records.totalMatches).toBe(3);
     expect(records.highestRawScore).toMatchObject([{ userId: "a", value: 50000, matchId: "m2" }]);
-    expect(records.highestPoint).toMatchObject([{ userId: "a", value: 70, matchId: "m2" }]);
-    expect(records.largestRawScoreWinMargin).toMatchObject([{ userId: "a", secondUserId: "b", value: 30000, matchId: "m2" }]);
-    expect(records.largestPointWinMargin).toMatchObject([{ userId: "a", secondUserId: "b", value: 80, matchId: "m2" }]);
     expect(records.mostTops).toEqual([{ userId: "a", value: 2 }]);
     expect(records.bestAverageRank).toEqual([{ userId: "a", value: 4 / 3 }]);
     expect(records.longestTopStreak).toEqual([{ userId: "a", value: 2 }]);
-    expect(records.longestNoLastStreak).toEqual([
-      { userId: "a", value: 3 },
-      { userId: "b", value: 3 },
-      { userId: "c", value: 3 }
+    expect(records.bestLastAvoidanceRate).toEqual([
+      { userId: "a", value: 100 },
+      { userId: "b", value: 100 },
+      { userId: "c", value: 100 }
     ]);
   });
 
@@ -88,6 +85,16 @@ describe("records", () => {
     ]);
 
     expect(records.longestTopStreak).toEqual([]);
-    expect(records.longestNoLastStreak).toEqual([]);
+  });
+
+  it("requires enough games for last avoidance rate records", () => {
+    const records = calculateRecords("4p", [
+      result("m1", 1, "a", 1, 42000, 62),
+      result("m1", 1, "b", 2, 31000, 11),
+      result("m1", 1, "c", 3, 25000, -15),
+      result("m1", 1, "d", 4, 2000, -58)
+    ], 2);
+
+    expect(records.bestLastAvoidanceRate).toEqual([]);
   });
 });

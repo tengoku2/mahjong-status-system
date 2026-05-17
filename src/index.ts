@@ -25,7 +25,7 @@ import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, rankingWithLatestMatchDeltaForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
-import type { MarginRecord, MatchRecord, PlayerRecord } from "./records.js";
+import type { MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -489,78 +489,56 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
     return name;
   };
   const matchText = (playedAt: Date) => formatDate(playedAt);
-  const empty = "記録なし";
+  const empty = "\u8a18\u9332\u306a\u3057";
 
   const highestRawScore = await summarizeRecordList<MatchRecord>(
     currentRecords.highestRawScore,
-    async (record) => `${await nameFor(record.userId)} ${record.value}点\n${matchText(record.playedAt)}`,
+    async (record) => `${await nameFor(record.userId)} ${record.value}\u70b9
+${matchText(record.playedAt)}` ,
     empty,
-    "件"
-  );
-  const highestPoint = await summarizeRecordList<MatchRecord>(
-    currentRecords.highestPoint,
-    async (record) => `${await nameFor(record.userId)} ${formatPoint(record.value)}pt\n${matchText(record.playedAt)}`,
-    empty,
-    "件"
-  );
-  const rawScoreMargin = await summarizeRecordList<MarginRecord>(
-    currentRecords.largestRawScoreWinMargin,
-    async (record) => `${await nameFor(record.userId)} +${record.value}点 vs ${await nameFor(record.secondUserId)}\n${matchText(record.playedAt)}`,
-    empty,
-    "件"
-  );
-  const pointMargin = await summarizeRecordList<MarginRecord>(
-    currentRecords.largestPointWinMargin,
-    async (record) =>
-      `${await nameFor(record.userId)} +${formatPoint(record.value)}pt vs ${await nameFor(record.secondUserId)}\n${matchText(record.playedAt)}`,
-    empty,
-    "件"
+    "\u4ef6"
   );
   const mostTops = await summarizeRecordList<PlayerRecord>(
     currentRecords.mostTops,
-    async (record) => `${await nameFor(record.userId)} ${record.value}回`,
+    async (record) => `${await nameFor(record.userId)} ${record.value}\u56de`,
     empty,
-    "名"
+    "\u540d"
   );
   const bestAverageRank = await summarizeRecordList<PlayerRecord>(
     currentRecords.bestAverageRank,
-    async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(2)}位`,
-    `${currentRecords.qualifiedMinGames}戦以上の記録なし`,
-    "名"
+    async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(2)}\u4f4d`,
+    `${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057`,
+    "\u540d"
   );
   const topStreak = await summarizeRecordList<PlayerRecord>(
     currentRecords.longestTopStreak,
-    async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
-    "2連続以上の記録なし",
-    "名"
+    async (record) => `${await nameFor(record.userId)} ${record.value}\u9023\u7d9a`,
+    "2\u9023\u7d9a\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057",
+    "\u540d"
   );
-  const noLastStreak = await summarizeRecordList<PlayerRecord>(
-    currentRecords.longestNoLastStreak,
-    async (record) => `${await nameFor(record.userId)} ${record.value}連続`,
-    "2連続以上の記録なし",
-    "名"
+  const lastAvoidanceRate = await summarizeRecordList<PlayerRecord>(
+    currentRecords.bestLastAvoidanceRate,
+    async (record) => `${await nameFor(record.userId)} ${formatPercent(record.value)}`,
+    `${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057`,
+    "\u540d"
   );
 
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${typeLabel(type)} レコード`)
+        .setTitle(`${typeLabel(type)} \u30ec\u30b3\u30fc\u30c9`)
         .setDescription(
-          `種別: ${typeLabel(type)} / ${season ? `シーズン: ${formatSeasonLabel(season)}` : `期間: ${formatPeriodLabel(period!)}`}${
-            tournamentName ? ` / 大会名: ${tournamentName}` : ""
-          }\n対象対局数: ${
-            currentRecords.totalMatches
-          }`
+          `\u7a2e\u5225: ${typeLabel(type)} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
+            tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
+          }
+\u5bfe\u8c61\u5bfe\u5c40\u6570: ${currentRecords.totalMatches}`
         )
         .addFields(
-          { name: "最高スコア", value: highestRawScore, inline: false },
-          { name: "最高pt", value: highestPoint, inline: false },
-          { name: "最大トップ差", value: rawScoreMargin, inline: false },
-          { name: "最大pt差", value: pointMargin, inline: false },
-          { name: "最多トップ", value: mostTops, inline: true },
-          { name: `最高平均順位 (${currentRecords.qualifiedMinGames}戦以上)`, value: bestAverageRank, inline: true },
-          { name: "連続トップ", value: topStreak, inline: true },
-          { name: "連続ラス回避", value: noLastStreak, inline: true }
+          { name: "\u6700\u9ad8\u30b9\u30b3\u30a2", value: highestRawScore, inline: false },
+          { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: true },
+          { name: `\u6700\u9ad8\u5e73\u5747\u9806\u4f4d(${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a)`, value: bestAverageRank, inline: true },
+          { name: "\u9023\u7d9a\u30c8\u30c3\u30d7", value: topStreak, inline: true },
+          { name: `\u30e9\u30b9\u56de\u907f\u7387(${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a)`, value: lastAvoidanceRate, inline: true }
         )
     ]
   });

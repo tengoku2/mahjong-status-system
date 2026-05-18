@@ -1,4 +1,4 @@
-﻿import "dotenv/config";
+import "dotenv/config";
 import { createReadStream, existsSync, statSync } from "node:fs";
 import { opendir, stat } from "node:fs/promises";
 import { EOL, homedir } from "node:os";
@@ -10,6 +10,7 @@ interface WatchOptions {
   apiKey?: string;
   guildId?: string;
   logPath?: string;
+  autoFollowLatestLog: boolean;
   dryRun: boolean;
   localOnly: boolean;
   allowPlaceholderPlayers: boolean;
@@ -47,6 +48,7 @@ function options(): WatchOptions {
     apiKey: localOnly ? process.env.EXTERNAL_API_KEY?.trim() : requireEnv("EXTERNAL_API_KEY"),
     guildId: process.env.TANKI_GUILD_ID?.trim() || process.env.DISCORD_GUILD_ID?.trim(),
     logPath: process.env.TANKI_LOG_PATH?.trim(),
+    autoFollowLatestLog: (process.env.TANKI_AUTO_FOLLOW_LATEST_LOG ?? "true").toLowerCase() !== "false",
     dryRun: (process.env.TANKI_DRY_RUN ?? "true").toLowerCase() !== "false",
     localOnly,
     allowPlaceholderPlayers: (process.env.TANKI_ALLOW_PLACEHOLDER_PLAYERS ?? "false").toLowerCase() === "true",
@@ -55,8 +57,12 @@ function options(): WatchOptions {
   };
 }
 
+function vrchatLogDir(): string {
+  return join(homedir(), "AppData", "LocalLow", "VRChat", "VRChat");
+}
+
 async function newestVrchatLog(): Promise<string> {
-  const dir = join(homedir(), "AppData", "LocalLow", "VRChat", "VRChat");
+  const dir = vrchatLogDir();
   const entries: Array<{ path: string; mtimeMs: number }> = [];
   const handle = await opendir(dir);
   for await (const entry of handle) {
@@ -157,15 +163,31 @@ async function readExistingLines(path: string, prefix: string, onLine: (line: st
   }
 }
 
-async function watchAppendedLines(path: string, onChunkLine: (line: string) => Promise<void>, pollMs: number) {
-  let position = statSync(path).size;
+async function watchAppendedLines(initialPath: string, onChunkLine: (line: string) => Promise<void>, opts: WatchOptions) {
+  let currentPath = resolve(initialPath);
+  let position = statSync(currentPath).size;
   let carry = "";
+
+  console.log(`監視中: ${basename(currentPath)} / 接頭辞: ${opts.prefix}`);
+  console.log(`モード: ${opts.localOnly ? "localOnly" : opts.dryRun ? "dryRun" : "register"}`);
+
   setInterval(async () => {
     try {
-      if (!existsSync(path)) {
+      if (!opts.logPath && opts.autoFollowLatestLog) {
+        const latestPath = resolve(await newestVrchatLog());
+        if (latestPath !== currentPath) {
+          currentPath = latestPath;
+          position = existsSync(currentPath) ? statSync(currentPath).size : 0;
+          carry = "";
+          console.log(`監視対象を切り替えました: ${basename(currentPath)}`);
+        }
+      }
+
+      if (!existsSync(currentPath)) {
         return;
       }
-      const size = statSync(path).size;
+
+      const size = statSync(currentPath).size;
       if (size < position) {
         position = 0;
         carry = "";
@@ -174,7 +196,7 @@ async function watchAppendedLines(path: string, onChunkLine: (line: string) => P
         return;
       }
 
-      const stream = createReadStream(path, { encoding: "utf8", start: position, end: size - 1 });
+      const stream = createReadStream(currentPath, { encoding: "utf8", start: position, end: size - 1 });
       position = size;
       for await (const chunk of stream) {
         carry += chunk;
@@ -187,14 +209,18 @@ async function watchAppendedLines(path: string, onChunkLine: (line: string) => P
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
     }
-  }, pollMs);
+  }, opts.pollMs);
 }
 
 async function main() {
   const opts = options();
   const logPath = resolve(opts.logPath || (await newestVrchatLog()));
-  console.log(`監視中: ${basename(logPath)} / 接頭辞: ${opts.prefix}`);
-  console.log(`モード: ${opts.localOnly ? "localOnly" : opts.dryRun ? "dryRun" : "register"}`);
+  if (opts.logPath) {
+    console.log(`監視対象ログ: ${logPath}`);
+  } else {
+    console.log(`監視対象ログ: 自動追従 (${vrchatLogDir()})`);
+    console.log(`現在の開始ログ: ${basename(logPath)}`);
+  }
 
   const seen = new Set<string>();
   async function handleLine(line: string) {
@@ -229,7 +255,7 @@ async function main() {
   if ((process.env.TANKI_READ_EXISTING ?? "false").toLowerCase() === "true") {
     await readExistingLines(logPath, opts.prefix, handleLine);
   }
-  await watchAppendedLines(logPath, handleLine, opts.pollMs);
+  await watchAppendedLines(logPath, handleLine, opts);
 }
 
 await main();

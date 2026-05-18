@@ -9,7 +9,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$secureKey = Read-Host "EXTERNAL_API_KEYを入力してください" -AsSecureString
+$secureKey = Read-Host "Enter EXTERNAL_API_KEY" -AsSecureString
 $keyPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
 try {
   $env:EXTERNAL_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPtr)
@@ -27,12 +27,12 @@ $env:TANKI_AUTO_FOLLOW_LATEST_LOG = "true"
 
 if ($LogPath) {
   $env:TANKI_LOG_PATH = $LogPath
-  Write-Host "監視対象ログ: $LogPath"
+  Write-Host "Log path: $LogPath"
 } else {
   Remove-Item Env:TANKI_LOG_PATH -ErrorAction SilentlyContinue
-  Write-Host "監視対象ログ: 自動追従"
+  Write-Host "Log path: auto-follow"
 }
 
-Write-Host "モード: dryRun。APIには送信しますが、DB登録は行いません。"
+Write-Host "Mode: dryRun"
 Set-Location $repoRoot
 scripts\with-node22.cmd run tanki:watch

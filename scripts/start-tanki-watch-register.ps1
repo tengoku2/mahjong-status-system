@@ -9,13 +9,13 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-$answer = Read-Host "このモードはDBへ対局を登録します。続行する場合は REGISTER と入力してください"
+$answer = Read-Host "Type REGISTER to continue"
 if ($answer -ne "REGISTER") {
-  Write-Host "キャンセルしました。"
+  Write-Host "Canceled."
   exit 0
 }
 
-$secureKey = Read-Host "EXTERNAL_API_KEYを入力してください" -AsSecureString
+$secureKey = Read-Host "Enter EXTERNAL_API_KEY" -AsSecureString
 $keyPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureKey)
 try {
   $env:EXTERNAL_API_KEY = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($keyPtr)
@@ -33,12 +33,12 @@ $env:TANKI_AUTO_FOLLOW_LATEST_LOG = "true"
 
 if ($LogPath) {
   $env:TANKI_LOG_PATH = $LogPath
-  Write-Host "監視対象ログ: $LogPath"
+  Write-Host "Log path: $LogPath"
 } else {
   Remove-Item Env:TANKI_LOG_PATH -ErrorAction SilentlyContinue
-  Write-Host "監視対象ログ: 自動追従"
+  Write-Host "Log path: auto-follow"
 }
 
-Write-Host "モード: 本登録。対局結果をDBへ保存します。"
+Write-Host "Mode: register"
 Set-Location $repoRoot
 scripts\with-node22.cmd run tanki:watch

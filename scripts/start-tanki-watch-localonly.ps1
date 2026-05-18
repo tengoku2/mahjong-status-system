@@ -17,12 +17,12 @@ $env:TANKI_AUTO_FOLLOW_LATEST_LOG = "true"
 
 if ($LogPath) {
   $env:TANKI_LOG_PATH = $LogPath
-  Write-Host "監視対象ログ: $LogPath"
+  Write-Host "Log path: $LogPath"
 } else {
   Remove-Item Env:TANKI_LOG_PATH -ErrorAction SilentlyContinue
-  Write-Host "監視対象ログ: 自動追従"
+  Write-Host "Log path: auto-follow"
 }
 
-Write-Host "モード: ローカル確認。APIには送信しません。"
+Write-Host "Mode: localOnly"
 Set-Location $repoRoot
 scripts\with-node22.cmd run tanki:watch

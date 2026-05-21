@@ -1,5 +1,7 @@
 import {
+  ChannelType,
   SlashCommandBuilder,
+  SlashCommandChannelOption,
   SlashCommandIntegerOption,
   SlashCommandStringOption,
   SlashCommandSubcommandBuilder,
@@ -78,6 +80,26 @@ function addCountOption(command: SlashCommandSubcommandBuilder, max = 50) {
   );
 }
 
+function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addStringOption((option: SlashCommandStringOption) =>
+      option
+        .setName("shanten")
+        .setDescription("出題する向聴数")
+        .addChoices(
+          { name: "指定なし", value: "any" },
+          { name: "一向聴", value: "iishanten" },
+          { name: "二向聴", value: "ryanshanten" }
+        )
+    )
+    .addChannelOption((option: SlashCommandChannelOption) =>
+      option
+        .setName("channel")
+        .setDescription("問題を投稿する専用チャンネル。未指定なら現在のチャンネル")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    );
+}
+
 export const mjsCommand = new SlashCommandBuilder()
   .setName("mjs")
   .setDescription("麻雀成績システム")
@@ -105,6 +127,7 @@ export const mjsCommand = new SlashCommandBuilder()
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))
   )
+  .addSubcommand((command) => addNanikiruOptions(command.setName("nanikiru").setDescription("平面何切るを出題します")))
   .addSubcommand((command) =>
     command
       .setName("del")

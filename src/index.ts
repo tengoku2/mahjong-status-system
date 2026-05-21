@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -9,16 +10,29 @@ import {
   GatewayIntentBits,
   MessageFlags,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
-  type ModalSubmitInteraction
+  type Message,
+  type ModalSubmitInteraction,
+  type StringSelectMenuInteraction
 } from "discord.js";
 import { createApiServer } from "./external-api.js";
 import { buildSeasonExportBundle, csvAttachment } from "./export.js";
 import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
+import {
+  formatHand,
+  generateNanikiruQuestion,
+  parseShantenFilter,
+  shantenFilterLabels,
+  tileLabel,
+  uniqueDiscardTiles,
+  type NanikiruQuestion,
+  type Tile
+} from "./nanikiru.js";
 import { parsePlayedAtInput } from "./date-input.js";
 import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, seasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
@@ -56,6 +70,16 @@ const pendingRecordOptions = new Map<
     tournamentName?: string;
     playedAt: Date;
     players: Array<{ userId: string; rank: number }>;
+  }
+>();
+
+const nanikiruQuestions = new Map<
+  string,
+  {
+    guildId: string;
+    question: NanikiruQuestion;
+    message: Message;
+    answers: Map<string, Tile>;
   }
 >();
 
@@ -629,6 +653,119 @@ async function handleExport(interaction: ChatInputCommandInteraction) {
   });
 }
 
+function nanikiruEmbed(question: NanikiruQuestion, answerCount: number) {
+  return new EmbedBuilder()
+    .setTitle("平面何切る")
+    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${answerCount}`)
+    .setFooter({ text: "回答すると、自分だけに現在の回答分布が表示されます。" });
+}
+
+function shantenLabel(shanten: number): string {
+  if (shanten === 0) {
+    return "聴牌";
+  }
+  if (shanten === 1) {
+    return "一向聴";
+  }
+  if (shanten === 2) {
+    return "二向聴";
+  }
+  return `${shanten}向聴`;
+}
+
+function nanikiruAnswerRow(questionId: string, hand: Tile[]) {
+  return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`mjs:nanikiru:${questionId}`)
+      .setPlaceholder("切る牌を選択")
+      .addOptions(
+        uniqueDiscardTiles(hand).map((tile) => ({
+          label: tileLabel(tile),
+          value: `${tile}`
+        }))
+      )
+  );
+}
+
+function nanikiruDistribution(answers: Map<string, Tile>): string {
+  const counts = new Map<Tile, number>();
+  for (const tile of answers.values()) {
+    counts.set(tile, (counts.get(tile) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort(([leftTile, leftCount], [rightTile, rightCount]) => rightCount - leftCount || leftTile - rightTile)
+    .map(([tile, count]) => `${tileLabel(tile)} ${count}票`)
+    .join(" / ");
+}
+
+async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  const filter = parseShantenFilter(interaction.options.getString("shanten"));
+  const question = generateNanikiruQuestion(filter);
+  const selectedChannel = interaction.options.getChannel("channel");
+  const targetChannel = selectedChannel ? await interaction.client.channels.fetch(selectedChannel.id) : interaction.channel;
+
+  if (!targetChannel?.isTextBased() || !("send" in targetChannel)) {
+    await interaction.editReply("投稿先にはテキストチャンネルを指定してください。");
+    return;
+  }
+
+  const questionId = randomUUID();
+  const message = await targetChannel.send({
+    embeds: [nanikiruEmbed(question, 0)],
+    components: [nanikiruAnswerRow(questionId, question.hand)]
+  });
+  nanikiruQuestions.set(questionId, {
+    guildId,
+    question,
+    message,
+    answers: new Map()
+  });
+  setTimeout(() => nanikiruQuestions.delete(questionId), 24 * 60 * 60 * 1000).unref();
+
+  const destination = targetChannel.id === interaction.channelId ? "このチャンネル" : `<#${targetChannel.id}>`;
+  await interaction.editReply(`${destination} に ${shantenFilterLabels[filter]} の何切るを投稿しました。`);
+}
+
+async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
+  const [, feature, questionId] = interaction.customId.split(":");
+  if (feature !== "nanikiru" || !questionId) {
+    return;
+  }
+
+  const state = nanikiruQuestions.get(questionId);
+  if (!state || state.guildId !== interaction.guildId) {
+    await interaction.reply({
+      content: "この問題の受付は終了しました。新しく `/mjs nanikiru` を実行してください。",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const selectedTile = Number(interaction.values[0]);
+  if (!Number.isInteger(selectedTile) || !uniqueDiscardTiles(state.question.hand).includes(selectedTile)) {
+    await interaction.reply({ content: "不正な回答です。", flags: MessageFlags.Ephemeral });
+    return;
+  }
+
+  const previousAnswer = state.answers.get(interaction.user.id);
+  state.answers.set(interaction.user.id, selectedTile);
+  await state.message.edit({
+    embeds: [nanikiruEmbed(state.question, state.answers.size)],
+    components: [nanikiruAnswerRow(questionId, state.question.hand)]
+  });
+
+  const answerText = previousAnswer === undefined
+    ? `あなたの回答: ${tileLabel(selectedTile)}`
+    : `あなたの回答を ${tileLabel(previousAnswer)} から ${tileLabel(selectedTile)} に変更しました。`;
+  await interaction.reply({
+    content: `${answerText}\n現在の回答分布: ${nanikiruDistribution(state.answers)}`,
+    flags: MessageFlags.Ephemeral
+  });
+}
+
 function confirmRow(action: "del" | "undo", matchId: string) {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -783,6 +920,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs best` レコードを表示",
     "`/mjs awards` シーズン表彰を表示",
     "`/mjs export` CSVを出力",
+    "`/mjs nanikiru` 平面何切るを出題",
     "`/mjs log` ユーザー別の対局履歴を表示",
     "`/mjs matches` サーバー全体の対局一覧を表示",
     "`/mjs del` 指定した対局を削除",
@@ -829,6 +967,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleAwards(interaction);
   } else if (subcommand === "export") {
     await handleExport(interaction);
+  } else if (subcommand === "nanikiru") {
+    await handleNanikiruCommand(interaction);
   } else if (subcommand === "del") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {
@@ -866,6 +1006,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleChatInput(interaction);
     } else if (interaction.isModalSubmit() && interaction.customId.startsWith("mjs:add")) {
       await handleRecordModal(interaction);
+    } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith("mjs:nanikiru:")) {
+      await handleNanikiruAnswer(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("mjs:")) {
       await handleConfirmButton(interaction);
     }

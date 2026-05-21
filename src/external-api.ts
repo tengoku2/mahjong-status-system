@@ -4,7 +4,7 @@ import type { Client } from "discord.js";
 import { prisma } from "./prisma.js";
 import { createExternalMatch } from "./services.js";
 import { calculateResults, normalizeMahjongType } from "./scoring.js";
-import type { MahjongType, PlayerInput } from "./types.js";
+import type { HandEndType, HandInput, HandPlayerStatInput, MahjongType, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
 const maxBodyBytes = 64 * 1024;
@@ -19,6 +19,7 @@ interface ExternalMatchPayload {
   externalMatchId?: unknown;
   dryRun?: unknown;
   players?: unknown;
+  hands?: unknown;
 }
 
 interface ExternalPlayerPayload {
@@ -28,6 +29,83 @@ interface ExternalPlayerPayload {
   vrcName?: unknown;
   rank?: unknown;
   rawScore?: unknown;
+}
+
+interface ExternalHandPayload {
+  handIndex?: unknown;
+  roundWind?: unknown;
+  roundNumber?: unknown;
+  honba?: unknown;
+  kyotaku?: unknown;
+  dealerDiscordUserId?: unknown;
+  dealerUserId?: unknown;
+  dealerDisplayName?: unknown;
+  dealerVrcName?: unknown;
+  endType?: unknown;
+  abortReason?: unknown;
+  playerStats?: unknown;
+}
+
+interface ExternalHandPlayerStatPayload {
+  discordUserId?: unknown;
+  userId?: unknown;
+  displayName?: unknown;
+  vrcName?: unknown;
+  seat?: unknown;
+  startScore?: unknown;
+  endScore?: unknown;
+  isTenpaiAtRyukyoku?: unknown;
+  declaredRiichi?: unknown;
+  calledOpenMeld?: unknown;
+  won?: unknown;
+  wonByTsumo?: unknown;
+  dealtIn?: unknown;
+  winScore?: unknown;
+  dealInScore?: unknown;
+  winOrder?: unknown;
+  isDama?: unknown;
+  ippatsuWin?: unknown;
+  uraDoraCount?: unknown;
+}
+
+interface ParsedExternalPlayer {
+  userId?: string;
+  displayName?: string;
+  rank: number;
+  rawScore: number;
+}
+
+interface ParsedExternalHandPlayerStat {
+  userId?: string;
+  displayName?: string;
+  seat?: number;
+  startScore?: number;
+  endScore?: number;
+  isTenpaiAtRyukyoku?: boolean;
+  declaredRiichi?: boolean;
+  calledOpenMeld?: boolean;
+  won?: boolean;
+  wonByTsumo?: boolean;
+  dealtIn?: boolean;
+  winScore?: number;
+  dealInScore?: number;
+  winOrder?: number;
+  isDama?: boolean;
+  ippatsuWin?: boolean;
+  uraDoraCount?: number;
+}
+
+interface ParsedExternalHand {
+  handIndex: number;
+  roundWind: string;
+  roundNumber: number;
+  honba?: number;
+  kyotaku?: number;
+  dealerUserId?: string;
+  dealerDisplayName?: string;
+  endType: HandEndType;
+  abortReason?: string;
+  playerStats: ParsedExternalHandPlayerStat[];
 }
 
 class HttpError extends Error {
@@ -80,6 +158,30 @@ function requireString(value: unknown, fieldName: string): string {
   return value.trim();
 }
 
+function requireInteger(value: unknown, fieldName: string): number {
+  if (!Number.isInteger(value)) {
+    throw new HttpError(400, `${fieldName} must be an integer.`);
+  }
+  return value as number;
+}
+
+function optionalInteger(value: unknown, fieldName: string): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return requireInteger(value, fieldName);
+}
+
+function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new HttpError(400, `${fieldName} must be a boolean.`);
+  }
+  return value;
+}
+
 function normalizeType(value: unknown): MahjongType {
   const text = requireString(value, "type");
   try {
@@ -87,6 +189,14 @@ function normalizeType(value: unknown): MahjongType {
   } catch {
     throw new HttpError(400, "type must be 3p, 4p, 3p_east, or 4p_east.");
   }
+}
+
+function normalizeHandEndType(value: unknown, fieldName: string): HandEndType {
+  const text = requireString(value, fieldName).toUpperCase();
+  if (text !== "AGARI" && text !== "RYUKYOKU" && text !== "ABORTIVE" && text !== "FORCED_END") {
+    throw new HttpError(400, `${fieldName} must be AGARI, RYUKYOKU, ABORTIVE, or FORCED_END.`);
+  }
+  return text;
 }
 
 function parsePlayedAt(value: unknown): Date | undefined {
@@ -104,13 +214,6 @@ function parsePlayedAt(value: unknown): Date | undefined {
     throw new HttpError(400, "playedAt must be YYYY-MM-DD or an ISO datetime.");
   }
   return date;
-}
-
-interface ParsedExternalPlayer {
-  userId?: string;
-  displayName?: string;
-  rank: number;
-  rawScore: number;
 }
 
 function normalizeDisplayName(value: unknown): string | undefined {
@@ -136,26 +239,124 @@ function normalizePlayers(value: unknown): ParsedExternalPlayer[] {
     if (!userId && !displayName) {
       throw new HttpError(400, `players[${index}] must include discordUserId or displayName.`);
     }
-    const rank = player.rank;
-    const rawScore = player.rawScore;
-    if (!Number.isInteger(rank)) {
-      throw new HttpError(400, `players[${index}].rank must be an integer.`);
+    return {
+      userId: userId || undefined,
+      displayName,
+      rank: requireInteger(player.rank, `players[${index}].rank`),
+      rawScore: requireInteger(player.rawScore, `players[${index}].rawScore`)
+    };
+  });
+}
+
+function normalizeHandPlayerStats(value: unknown): ParsedExternalHandPlayerStat[] {
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "hands[].playerStats must be an array.");
+  }
+
+  return value.map((entry, index) => {
+    const stat = entry as ExternalHandPlayerStatPayload;
+    const userId = typeof stat.discordUserId === "string" ? stat.discordUserId.trim() : typeof stat.userId === "string" ? stat.userId.trim() : "";
+    const displayName = normalizeDisplayName(stat.displayName) ?? normalizeDisplayName(stat.vrcName);
+    if (userId && !idPattern.test(userId)) {
+      throw new HttpError(400, `hands[].playerStats[${index}].discordUserId must be a Discord user ID.`);
     }
-    if (!Number.isInteger(rawScore)) {
-      throw new HttpError(400, `players[${index}].rawScore must be an integer.`);
+    if (!userId && !displayName) {
+      throw new HttpError(400, `hands[].playerStats[${index}] must include discordUserId or displayName.`);
     }
 
     return {
       userId: userId || undefined,
       displayName,
-      rank: rank as number,
-      rawScore: rawScore as number
+      seat: optionalInteger(stat.seat, `hands[].playerStats[${index}].seat`),
+      startScore: optionalInteger(stat.startScore, `hands[].playerStats[${index}].startScore`),
+      endScore: optionalInteger(stat.endScore, `hands[].playerStats[${index}].endScore`),
+      isTenpaiAtRyukyoku: optionalBoolean(stat.isTenpaiAtRyukyoku, `hands[].playerStats[${index}].isTenpaiAtRyukyoku`),
+      declaredRiichi: optionalBoolean(stat.declaredRiichi, `hands[].playerStats[${index}].declaredRiichi`),
+      calledOpenMeld: optionalBoolean(stat.calledOpenMeld, `hands[].playerStats[${index}].calledOpenMeld`),
+      won: optionalBoolean(stat.won, `hands[].playerStats[${index}].won`),
+      wonByTsumo: optionalBoolean(stat.wonByTsumo, `hands[].playerStats[${index}].wonByTsumo`),
+      dealtIn: optionalBoolean(stat.dealtIn, `hands[].playerStats[${index}].dealtIn`),
+      winScore: optionalInteger(stat.winScore, `hands[].playerStats[${index}].winScore`),
+      dealInScore: optionalInteger(stat.dealInScore, `hands[].playerStats[${index}].dealInScore`),
+      winOrder: optionalInteger(stat.winOrder, `hands[].playerStats[${index}].winOrder`),
+      isDama: optionalBoolean(stat.isDama, `hands[].playerStats[${index}].isDama`),
+      ippatsuWin: optionalBoolean(stat.ippatsuWin, `hands[].playerStats[${index}].ippatsuWin`),
+      uraDoraCount: optionalInteger(stat.uraDoraCount, `hands[].playerStats[${index}].uraDoraCount`)
     };
   });
 }
 
+function normalizeHands(value: unknown): ParsedExternalHand[] | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new HttpError(400, "hands must be an array.");
+  }
+
+  const hands = value.map((entry, index) => {
+    const hand = entry as ExternalHandPayload;
+    const dealerUserId =
+      typeof hand.dealerDiscordUserId === "string"
+        ? hand.dealerDiscordUserId.trim()
+        : typeof hand.dealerUserId === "string"
+          ? hand.dealerUserId.trim()
+          : "";
+    const dealerDisplayName = normalizeDisplayName(hand.dealerDisplayName) ?? normalizeDisplayName(hand.dealerVrcName);
+    if (dealerUserId && !idPattern.test(dealerUserId)) {
+      throw new HttpError(400, `hands[${index}].dealerDiscordUserId must be a Discord user ID.`);
+    }
+
+    return {
+      handIndex: requireInteger(hand.handIndex, `hands[${index}].handIndex`),
+      roundWind: requireString(hand.roundWind, `hands[${index}].roundWind`),
+      roundNumber: requireInteger(hand.roundNumber, `hands[${index}].roundNumber`),
+      honba: optionalInteger(hand.honba, `hands[${index}].honba`),
+      kyotaku: optionalInteger(hand.kyotaku, `hands[${index}].kyotaku`),
+      dealerUserId: dealerUserId || undefined,
+      dealerDisplayName,
+      endType: normalizeHandEndType(hand.endType, `hands[${index}].endType`),
+      abortReason: typeof hand.abortReason === "string" ? hand.abortReason.trim() || undefined : undefined,
+      playerStats: normalizeHandPlayerStats(hand.playerStats)
+    };
+  });
+
+  const uniqueIndexes = new Set(hands.map((hand) => hand.handIndex));
+  if (uniqueIndexes.size !== hands.length) {
+    throw new HttpError(400, "hands[].handIndex must be unique.");
+  }
+
+  return hands.sort((a, b) => a.handIndex - b.handIndex);
+}
+
 function normalizeNameForMatch(value: string): string {
   return value.normalize("NFKC").trim().toLowerCase();
+}
+
+function buildProfilesByName(profiles: Array<{ userId: string; vrcName: string }>) {
+  const profilesByName = new Map<string, Array<{ userId: string; vrcName: string }>>();
+  for (const profile of profiles) {
+    const key = normalizeNameForMatch(profile.vrcName);
+    const current = profilesByName.get(key) ?? [];
+    current.push(profile);
+    profilesByName.set(key, current);
+  }
+  return profilesByName;
+}
+
+function resolveUserIdByName(
+  profilesByName: Map<string, Array<{ userId: string; vrcName: string }>>,
+  displayName: string,
+  fieldName: string
+) {
+  const matches = profilesByName.get(normalizeNameForMatch(displayName)) ?? [];
+  if (matches.length === 0) {
+    throw new HttpError(400, `${fieldName} is not registered in this guild.`);
+  }
+  if (matches.length > 1) {
+    throw new HttpError(400, `${fieldName} matches multiple registered users.`);
+  }
+  return matches[0].userId;
 }
 
 async function resolvePlayersByDisplayName(guildId: string, players: ParsedExternalPlayer[]): Promise<PlayerInput[]> {
@@ -169,22 +370,13 @@ async function resolvePlayersByDisplayName(guildId: string, players: ParsedExter
   }
 
   const profiles = await prisma.userProfile.findMany({
-    where: {
-      guildId
-    },
+    where: { guildId },
     select: {
       userId: true,
       vrcName: true
     }
   });
-
-  const profilesByName = new Map<string, Array<{ userId: string; vrcName: string }>>();
-  for (const profile of profiles) {
-    const key = normalizeNameForMatch(profile.vrcName);
-    const current = profilesByName.get(key) ?? [];
-    current.push(profile);
-    profilesByName.set(key, current);
-  }
+  const profilesByName = buildProfilesByName(profiles);
 
   return players.map((player, index) => {
     if (player.userId) {
@@ -195,21 +387,68 @@ async function resolvePlayersByDisplayName(guildId: string, players: ParsedExter
       };
     }
 
-    const displayName = player.displayName as string;
-    const matches = profilesByName.get(normalizeNameForMatch(displayName)) ?? [];
-    if (matches.length === 0) {
-      throw new HttpError(400, `players[${index}].displayName is not registered in this guild.`);
-    }
-    if (matches.length > 1) {
-      throw new HttpError(400, `players[${index}].displayName matches multiple registered users.`);
-    }
-
     return {
-      userId: matches[0].userId,
+      userId: resolveUserIdByName(profilesByName, player.displayName as string, `players[${index}].displayName`),
       rank: player.rank,
       rawScore: player.rawScore
     };
   });
+}
+
+async function resolveHandsByDisplayName(guildId: string, hands: ParsedExternalHand[] | undefined): Promise<HandInput[] | undefined> {
+  if (!hands || hands.length === 0) {
+    return undefined;
+  }
+
+  const unresolvedNames = hands.some(
+    (hand) => (!hand.dealerUserId && hand.dealerDisplayName) || hand.playerStats.some((stat) => !stat.userId)
+  );
+
+  const profiles = unresolvedNames
+    ? await prisma.userProfile.findMany({
+        where: { guildId },
+        select: {
+          userId: true,
+          vrcName: true
+        }
+      })
+    : [];
+  const profilesByName = buildProfilesByName(profiles);
+
+  return hands.map((hand, handIndex) => ({
+    handIndex: hand.handIndex,
+    roundWind: hand.roundWind,
+    roundNumber: hand.roundNumber,
+    honba: hand.honba,
+    kyotaku: hand.kyotaku,
+    dealerUserId:
+      hand.dealerUserId ??
+      (hand.dealerDisplayName
+        ? resolveUserIdByName(profilesByName, hand.dealerDisplayName, `hands[${handIndex}].dealerDisplayName`)
+        : undefined),
+    endType: hand.endType,
+    abortReason: hand.abortReason,
+    playerStats: hand.playerStats.map((stat, playerIndex) => ({
+      userId:
+        stat.userId ??
+        resolveUserIdByName(profilesByName, stat.displayName as string, `hands[${handIndex}].playerStats[${playerIndex}].displayName`),
+      seat: stat.seat,
+      startScore: stat.startScore,
+      endScore: stat.endScore,
+      isTenpaiAtRyukyoku: stat.isTenpaiAtRyukyoku,
+      declaredRiichi: stat.declaredRiichi,
+      calledOpenMeld: stat.calledOpenMeld,
+      won: stat.won,
+      wonByTsumo: stat.wonByTsumo,
+      dealtIn: stat.dealtIn,
+      winScore: stat.winScore,
+      dealInScore: stat.dealInScore,
+      winOrder: stat.winOrder,
+      isDama: stat.isDama,
+      ippatsuWin: stat.ippatsuWin,
+      uraDoraCount: stat.uraDoraCount
+    } satisfies HandPlayerStatInput))
+  }));
 }
 
 function authenticate(request: IncomingMessage) {
@@ -226,14 +465,24 @@ function authenticate(request: IncomingMessage) {
   }
 }
 
-async function assertGuildMembers(client: Client, guildId: string, players: PlayerInput[]) {
+async function assertGuildMembers(client: Client, guildId: string, players: PlayerInput[], hands?: HandInput[]) {
   const guild = await client.guilds.fetch(guildId).catch(() => null);
   if (!guild) {
     throw new HttpError(400, "guildId is not available to this bot.");
   }
 
-  for (const player of players) {
-    const member = await guild.members.fetch(player.userId).catch(() => null);
+  const userIds = new Set(players.map((player) => player.userId));
+  for (const hand of hands ?? []) {
+    if (hand.dealerUserId) {
+      userIds.add(hand.dealerUserId);
+    }
+    for (const stat of hand.playerStats) {
+      userIds.add(stat.userId);
+    }
+  }
+
+  for (const userId of userIds) {
+    const member = await guild.members.fetch(userId).catch(() => null);
     if (!member) {
       throw new HttpError(400, "サーバー内での対戦のみ有効です。");
     }
@@ -246,6 +495,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   const guildId = requireString(payload.guildId, "guildId");
   const type = normalizeType(payload.type);
   const parsedPlayers = normalizePlayers(payload.players);
+  const parsedHands = normalizeHands(payload.hands);
   const externalSource = requireString(payload.externalSource, "externalSource");
   const externalMatchId = requireString(payload.externalMatchId, "externalMatchId");
   const tournamentName = typeof payload.tournamentName === "string" ? payload.tournamentName.trim() || undefined : undefined;
@@ -263,8 +513,9 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   }
 
   const players = await resolvePlayersByDisplayName(guildId, parsedPlayers);
+  const hands = await resolveHandsByDisplayName(guildId, parsedHands);
   validatePlayers(type, players);
-  await assertGuildMembers(client, guildId, players);
+  await assertGuildMembers(client, guildId, players, hands);
 
   if (dryRun) {
     const existing = await prisma.externalMatch.findUnique({
@@ -287,6 +538,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
       type,
       tournamentName,
       playedAt,
+      handCount: hands?.length ?? 0,
       results: calculateResults(type, players).map((matchResult) => ({
         userId: matchResult.userId,
         rank: matchResult.rank,
@@ -297,10 +549,18 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
     return;
   }
 
-  const result = await createExternalMatch(guildId, type, players, tournamentName, playedAt, {
-    externalSource,
-    externalMatchId
-  });
+  const result = await createExternalMatch(
+    guildId,
+    type,
+    players,
+    tournamentName,
+    playedAt,
+    {
+      externalSource,
+      externalMatchId
+    },
+    hands
+  );
 
   sendJson(response, result.duplicate ? 200 : 201, {
     ok: true,
@@ -310,6 +570,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
     type: result.match.type,
     tournamentName: result.match.tournamentName,
     playedAt: result.match.playedAt,
+    handCount: hands?.length ?? 0,
     results: result.match.results.map((matchResult) => ({
       userId: matchResult.userId,
       rank: matchResult.rank,

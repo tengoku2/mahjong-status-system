@@ -1,10 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import { calculateSeasonAwards } from "./awards.js";
+import { calculateHandStats, type HandStatsSummary } from "./hand-stats.js";
 import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { periodDateRange, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
-import type { MahjongType, Period, PlayerInput } from "./types.js";
+import type { HandInput, MahjongType, Period, PlayerInput } from "./types.js";
 
 export interface ExternalMatchIdentity {
   externalSource: string;
@@ -19,6 +20,8 @@ export interface RankingEntry {
   averageRank: number;
   averagePoint: number;
 }
+
+export type AggregatedHandStats = HandStatsSummary;
 
 const transactionOptions = {
   maxWait: 10_000,
@@ -54,14 +57,15 @@ export async function createMatch(
   type: MahjongType,
   players: PlayerInput[],
   tournamentName?: string,
-  playedAt?: Date
+  playedAt?: Date,
+  hands?: HandInput[]
 ) {
   const normalizedType = normalizeMahjongType(type);
   const calculated = calculateResults(normalizedType, players);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
   return prisma.$transaction(async (tx) => {
-    await ensureGuildAndUsers(guildId, calculated.map((player) => player.userId), tx);
+    await ensureGuildAndUsers(guildId, collectMatchUserIds(calculated, hands), tx);
 
     return tx.match.create({
       data: {
@@ -69,6 +73,11 @@ export async function createMatch(
         type: normalizedType,
         tournamentName: normalizedTournamentName,
         playedAt,
+        hands: hands
+          ? {
+              create: buildHandCreateInputs(hands)
+            }
+          : undefined,
         results: {
           create: calculated.map((result) => ({
             userId: result.userId,
@@ -95,7 +104,8 @@ export async function createExternalMatch(
   players: PlayerInput[],
   tournamentName: string | undefined,
   playedAt: Date | undefined,
-  identity: ExternalMatchIdentity
+  identity: ExternalMatchIdentity,
+  hands?: HandInput[]
 ) {
   const normalizedType = normalizeMahjongType(type);
   const calculated = calculateResults(normalizedType, players);
@@ -129,7 +139,7 @@ export async function createExternalMatch(
       };
     }
 
-    await ensureGuildAndUsers(guildId, calculated.map((player) => player.userId), tx);
+    await ensureGuildAndUsers(guildId, collectMatchUserIds(calculated, hands), tx);
 
     const match = await tx.match.create({
       data: {
@@ -137,6 +147,11 @@ export async function createExternalMatch(
         type: normalizedType,
         tournamentName: normalizedTournamentName,
         playedAt,
+        hands: hands
+          ? {
+              create: buildHandCreateInputs(hands)
+            }
+          : undefined,
         results: {
           create: calculated.map((result) => ({
             userId: result.userId,
@@ -174,6 +189,52 @@ export async function createExternalMatch(
 export function normalizeTournamentName(value?: string | null): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
+}
+
+function collectMatchUserIds(players: Array<{ userId: string }>, hands?: HandInput[]): string[] {
+  const userIds = new Set(players.map((player) => player.userId));
+  for (const hand of hands ?? []) {
+    if (hand.dealerUserId) {
+      userIds.add(hand.dealerUserId);
+    }
+    for (const stat of hand.playerStats) {
+      userIds.add(stat.userId);
+    }
+  }
+  return [...userIds];
+}
+
+function buildHandCreateInputs(hands: HandInput[]) {
+  return hands.map((hand) => ({
+    handIndex: hand.handIndex,
+    roundWind: hand.roundWind,
+    roundNumber: hand.roundNumber,
+    honba: hand.honba ?? 0,
+    kyotaku: hand.kyotaku ?? 0,
+    dealerUserId: hand.dealerUserId,
+    endType: hand.endType,
+    abortReason: hand.abortReason,
+    playerStats: {
+      create: hand.playerStats.map((stat) => ({
+        userId: stat.userId,
+        seat: stat.seat,
+        startScore: stat.startScore,
+        endScore: stat.endScore,
+        isTenpaiAtRyukyoku: stat.isTenpaiAtRyukyoku,
+        declaredRiichi: stat.declaredRiichi ?? false,
+        calledOpenMeld: stat.calledOpenMeld ?? false,
+        won: stat.won ?? false,
+        wonByTsumo: stat.wonByTsumo ?? false,
+        dealtIn: stat.dealtIn ?? false,
+        winScore: stat.winScore,
+        dealInScore: stat.dealInScore,
+        winOrder: stat.winOrder,
+        isDama: stat.isDama,
+        ippatsuWin: stat.ippatsuWin,
+        uraDoraCount: stat.uraDoraCount
+      }))
+    }
+  }));
 }
 
 async function periodMatchIds(
@@ -323,6 +384,95 @@ export async function aggregateStats(guildId: string, type: MahjongType, period:
     averagePoint,
     rankCounts
   };
+}
+
+export async function aggregateHandStats(
+  guildId: string,
+  type: MahjongType,
+  period: Period,
+  userId: string,
+  tournamentName?: string
+): Promise<AggregatedHandStats> {
+  const normalizedType = normalizeMahjongType(type);
+  const matchIds = await periodMatchIds(guildId, type, period, userId, tournamentName);
+  const dateRange = periodDateRange(period);
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+
+  const [handRows, matchResults] = await Promise.all([
+    prisma.handPlayerStat.findMany({
+      where: {
+        userId,
+        hand: {
+          endType: {
+            in: ["AGARI", "RYUKYOKU"]
+          },
+          match: {
+            guildId,
+            type: normalizedType,
+            tournamentName: normalizedTournamentName,
+            matchId: matchIds ? { in: matchIds } : undefined,
+            playedAt:
+              dateRange
+                ? {
+                    gte: dateRange.start,
+                    lt: dateRange.end
+                  }
+                : undefined
+          }
+        }
+      },
+      select: {
+        hand: {
+          select: {
+            endType: true
+          }
+        },
+        declaredRiichi: true,
+        calledOpenMeld: true,
+        won: true,
+        wonByTsumo: true,
+        dealtIn: true,
+        isTenpaiAtRyukyoku: true,
+        winScore: true,
+        dealInScore: true,
+        winOrder: true,
+        isDama: true,
+        ippatsuWin: true,
+        uraDoraCount: true
+      }
+    }),
+    getResultsByOptions({
+      guildId,
+      types: [normalizedType],
+      userId,
+      tournamentName,
+      playedAtStart: dateRange?.start,
+      playedAtEnd: dateRange?.end,
+      matchIds
+    })
+  ]);
+
+  return calculateHandStats(
+    handRows.map((row) => ({
+      endType: row.hand.endType,
+      declaredRiichi: row.declaredRiichi,
+      calledOpenMeld: row.calledOpenMeld,
+      won: row.won,
+      wonByTsumo: row.wonByTsumo,
+      dealtIn: row.dealtIn,
+      isTenpaiAtRyukyoku: row.isTenpaiAtRyukyoku,
+      winScore: row.winScore,
+      dealInScore: row.dealInScore,
+      winOrder: row.winOrder,
+      isDama: row.isDama,
+      ippatsuWin: row.ippatsuWin,
+      uraDoraCount: row.uraDoraCount
+    })),
+    {
+      totalGames: matchResults.length,
+      bustCount: matchResults.filter((result) => result.rawScore < 0).length
+    }
+  );
 }
 
 export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {

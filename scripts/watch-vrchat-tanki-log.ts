@@ -25,7 +25,10 @@ interface TankiLogPayload {
   tournamentName?: string;
   externalSource?: string;
   externalMatchId?: string;
+  aborted?: boolean;
+  abortReason?: string;
   dryRun?: boolean;
+  hands?: unknown;
   players: Array<{
     displayName: string;
     rank: number;
@@ -110,6 +113,8 @@ function normalizePayload(raw: unknown, opts: WatchOptions): TankiLogPayload {
     guildId: payload.guildId || opts.guildId,
     externalSource: payload.externalSource || "tanki-log",
     externalMatchId: makeExternalMatchId(payload),
+    aborted: payload.aborted === true,
+    abortReason: typeof payload.abortReason === "string" ? payload.abortReason.trim() || undefined : undefined,
     dryRun: payload.dryRun ?? opts.dryRun
   };
 }
@@ -122,6 +127,10 @@ function placeholderPlayerPositions(payload: TankiLogPayload): number[] {
 }
 
 function validateReadyToSend(payload: TankiLogPayload, opts: WatchOptions) {
+  if (payload.aborted) {
+    return;
+  }
+
   if (opts.localOnly && opts.allowPlaceholderPlayers) {
     return;
   }
@@ -236,6 +245,13 @@ async function main() {
 
     try {
       const payload = normalizePayload(JSON.parse(jsonText), opts);
+      if (payload.aborted) {
+        console.log(
+          `send-skip aborted ${payload.externalMatchId}${payload.abortReason ? ` reason=${payload.abortReason}` : ""}${EOL}` +
+            JSON.stringify(payload, null, 2)
+        );
+        return;
+      }
       validateReadyToSend(payload, opts);
       if (opts.localOnly) {
         const placeholders = placeholderPlayerPositions(payload);

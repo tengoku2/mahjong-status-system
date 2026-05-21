@@ -48,6 +48,7 @@ model Match {
   guild          Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
   results        Result[]
   externalMatch  ExternalMatch?
+  hands          Hand[]
 
   @@index([guildId, type, playedAt])
   @@index([guildId, type, tournamentName, playedAt])
@@ -80,4 +81,59 @@ model ExternalMatch {
   @@id([externalSource, externalMatchId])
   @@index([guildId])
   @@map("external_matches")
+}
+
+enum HandEndType {
+  AGARI
+  RYUKYOKU
+  ABORTIVE
+  FORCED_END
+}
+
+model Hand {
+  handId       String      @id @default(cuid()) @map("hand_id")
+  matchId      String      @map("match_id")
+  handIndex    Int         @map("hand_index")
+  roundWind    String      @map("round_wind")
+  roundNumber  Int         @map("round_number")
+  honba        Int         @default(0)
+  kyotaku      Int         @default(0)
+  dealerUserId String?     @map("dealer_user_id")
+  endType      HandEndType @map("end_type")
+  abortReason  String?     @map("abort_reason")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  match        Match       @relation(fields: [matchId], references: [matchId], onDelete: Cascade)
+  playerStats  HandPlayerStat[]
+
+  @@unique([matchId, handIndex])
+  @@index([matchId, roundWind, roundNumber])
+  @@index([dealerUserId])
+  @@map("hands")
+}
+
+model HandPlayerStat {
+  handPlayerStatId   String   @id @default(cuid()) @map("hand_player_stat_id")
+  handId             String   @map("hand_id")
+  userId             String   @map("user_id")
+  seat               Int?     @map("seat")
+  startScore         Int?     @map("start_score")
+  endScore           Int?     @map("end_score")
+  isTenpaiAtRyukyoku Boolean? @map("is_tenpai_at_ryukyoku")
+  declaredRiichi     Boolean  @default(false) @map("declared_riichi")
+  calledOpenMeld     Boolean  @default(false) @map("called_open_meld")
+  won                Boolean  @default(false)
+  wonByTsumo         Boolean  @default(false) @map("won_by_tsumo")
+  dealtIn            Boolean  @default(false) @map("dealt_in")
+  winScore           Int?     @map("win_score")
+  dealInScore        Int?     @map("deal_in_score")
+  winOrder           Int?     @map("win_order")
+  isDama             Boolean? @map("is_dama")
+  ippatsuWin         Boolean? @map("ippatsu_win")
+  uraDoraCount       Int?     @map("ura_dora_count")
+  hand               Hand     @relation(fields: [handId], references: [handId], onDelete: Cascade)
+
+  @@unique([handId, userId])
+  @@index([userId])
+  @@index([won, dealtIn])
+  @@map("hand_player_stats")
 }

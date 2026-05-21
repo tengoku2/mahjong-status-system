@@ -4,6 +4,8 @@ export type Tile = number;
 
 export type ShantenFilter = "any" | "iishanten" | "ryanshanten";
 
+export type HonorTileMode = "include" | "exclude";
+
 export type NanikiruQuestion = {
   hand: Tile[];
   bestShanten: number;
@@ -20,11 +22,20 @@ export const shantenFilterLabels: Record<ShantenFilter, string> = {
   ryanshanten: "二向聴"
 };
 
+export const honorTileModeLabels: Record<HonorTileMode, string> = {
+  include: "字牌あり",
+  exclude: "字牌なし"
+};
+
 export function parseShantenFilter(value: string | null): ShantenFilter {
   if (value === "iishanten" || value === "ryanshanten") {
     return value;
   }
   return "any";
+}
+
+export function parseHonorTileMode(value: string | null): HonorTileMode {
+  return value === "exclude" ? "exclude" : "include";
 }
 
 export function tileLabel(tile: Tile): string {
@@ -42,7 +53,10 @@ export function tileLabel(tile: Tile): string {
 }
 
 export function formatHand(hand: Tile[]): string {
-  return [...hand].sort(compareTiles).map(tileLabel).join(" ");
+  const sorted = [...hand].sort(compareTiles);
+  const suitParts = [formatSuit(sorted, 0, "m"), formatSuit(sorted, 9, "p"), formatSuit(sorted, 18, "s")].filter(Boolean);
+  const honors = sorted.filter(isHonorTile).map(tileLabel).join("");
+  return [...suitParts, honors].filter(Boolean).join(" ");
 }
 
 export function uniqueDiscardTiles(hand: Tile[]): Tile[] {
@@ -53,11 +67,11 @@ export function compareTiles(a: Tile, b: Tile): number {
   return a - b;
 }
 
-export function generateNanikiruQuestion(filter: ShantenFilter = "any"): NanikiruQuestion {
+export function generateNanikiruQuestion(filter: ShantenFilter = "any", honorTileMode: HonorTileMode = "include"): NanikiruQuestion {
   const targetShanten = filterToShanten(filter);
 
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
-    const hand = drawRandomHand();
+    const hand = drawRandomHand(honorTileMode);
     const bestShanten = bestShantenAfterDiscard(hand);
     if (targetShanten === null || bestShanten === targetShanten) {
       return {
@@ -102,8 +116,9 @@ function filterToShanten(filter: ShantenFilter): number | null {
   return null;
 }
 
-function drawRandomHand(): Tile[] {
-  const wall = Array.from({ length: TILE_COUNT }, (_, tile) => [tile, tile, tile, tile]).flat();
+function drawRandomHand(honorTileMode: HonorTileMode): Tile[] {
+  const tileTypes = Array.from({ length: honorTileMode === "exclude" ? 27 : TILE_COUNT }, (_, tile) => tile);
+  const wall = tileTypes.flatMap((tile) => [tile, tile, tile, tile]);
   const hand: Tile[] = [];
 
   for (let i = 0; i < 14; i += 1) {
@@ -113,6 +128,18 @@ function drawRandomHand(): Tile[] {
   }
 
   return hand;
+}
+
+function formatSuit(sortedHand: Tile[], offset: number, suffix: "m" | "p" | "s"): string {
+  const digits = sortedHand
+    .filter((tile) => tile >= offset && tile < offset + 9)
+    .map((tile) => `${tile - offset + 1}`)
+    .join("");
+  return digits ? `${digits}${suffix}` : "";
+}
+
+function isHonorTile(tile: Tile): boolean {
+  return tile >= 27;
 }
 
 function removeOneTile(hand: Tile[], tile: Tile): Tile[] {

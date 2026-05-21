@@ -4,6 +4,7 @@ import {
   calculateShanten,
   formatHand,
   generateNanikiruQuestion,
+  parseHonorTileMode,
   tileLabel,
   uniqueDiscardTiles
 } from "../src/nanikiru.js";
@@ -16,7 +17,14 @@ describe("nanikiru", () => {
     expect(tileLabel(26)).toBe("9s");
     expect(tileLabel(27)).toBe("東");
     expect(tileLabel(33)).toBe("中");
-    expect(formatHand([33, 0, 9, 18])).toBe("1m 1p 1s 中");
+    expect(formatHand([33, 0, 1, 9, 18])).toBe("12m 1p 1s 中");
+    expect(formatHand([0, 1, 9, 10, 18, 19, 27, 28])).toBe("12m 12p 12s 東南");
+  });
+
+  it("parses honor tile modes", () => {
+    expect(parseHonorTileMode(null)).toBe("include");
+    expect(parseHonorTileMode("include")).toBe("include");
+    expect(parseHonorTileMode("exclude")).toBe("exclude");
   });
 
   it("deduplicates discard choices", () => {
@@ -37,5 +45,11 @@ describe("nanikiru", () => {
     const question = generateNanikiruQuestion("iishanten");
     expect(question.hand).toHaveLength(14);
     expect(question.bestShanten).toBe(1);
+  });
+
+  it("generates hands without honor tiles", () => {
+    const question = generateNanikiruQuestion("any", "exclude");
+    expect(question.hand).toHaveLength(14);
+    expect(question.hand.every((tile) => tile < 27)).toBe(true);
   });
 });

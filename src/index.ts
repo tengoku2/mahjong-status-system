@@ -14,7 +14,6 @@ import {
   type ButtonInteraction,
   type ChatInputCommandInteraction,
   type GuildMember,
-  type Message,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction
 } from "discord.js";
@@ -26,11 +25,15 @@ import { recordModal } from "./modals.js";
 import {
   formatHand,
   generateNanikiruQuestion,
+  honorTileModeLabels,
+  parseHonorTileMode,
   parseShantenFilter,
   shantenFilterLabels,
   tileLabel,
   uniqueDiscardTiles,
+  type HonorTileMode,
   type NanikiruQuestion,
+  type ShantenFilter,
   type Tile
 } from "./nanikiru.js";
 import { parsePlayedAtInput } from "./date-input.js";
@@ -73,15 +76,7 @@ const pendingRecordOptions = new Map<
   }
 >();
 
-const nanikiruQuestions = new Map<
-  string,
-  {
-    guildId: string;
-    question: NanikiruQuestion;
-    message: Message;
-    answers: Map<string, Tile>;
-  }
->();
+const nanikiruCloseTimers = new Map<string, NodeJS.Timeout>();
 
 function requireGuildId(interaction: { guildId: string | null }): string {
   if (!interaction.guildId) {
@@ -657,7 +652,14 @@ function nanikiruEmbed(question: NanikiruQuestion, answerCount: number) {
   return new EmbedBuilder()
     .setTitle("平面何切る")
     .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${answerCount}`)
-    .setFooter({ text: "回答すると、自分だけに現在の回答分布が表示されます。" });
+    .setFooter({ text: "回答すると、自分だけに現在の回答分布が表示されます。24時間後に締め切ります。" });
+}
+
+function closedNanikiruEmbed(question: NanikiruQuestion, answerCount: number) {
+  return new EmbedBuilder()
+    .setTitle("平面何切る（締切済み）")
+    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${answerCount}`)
+    .setFooter({ text: "この問題の回答受付は終了しました。" });
 }
 
 function shantenLabel(shanten: number): string {
@@ -692,41 +694,243 @@ function nanikiruDistribution(answers: Map<string, Tile>): string {
   for (const tile of answers.values()) {
     counts.set(tile, (counts.get(tile) ?? 0) + 1);
   }
+  return formatNanikiruCounts(counts);
+}
 
-  return [...counts.entries()]
+function formatNanikiruCounts(counts: Map<Tile, number>): string {
+  const lines = [...counts.entries()]
     .sort(([leftTile, leftCount], [rightTile, rightCount]) => rightCount - leftCount || leftTile - rightTile)
-    .map(([tile, count]) => `${tileLabel(tile)} ${count}票`)
-    .join(" / ");
+    .map(([tile, count]) => `${tileLabel(tile)} ${count}票`);
+  return lines.length ? lines.join(" / ") : "回答なし";
+}
+
+function serializeHand(hand: Tile[]): string {
+  return hand.join(",");
+}
+
+function deserializeHand(hand: string): Tile[] {
+  return hand.split(",").map((tile) => Number(tile));
+}
+
+function storedQuestion(problem: { hand: string; bestShanten: number }): NanikiruQuestion {
+  return {
+    hand: deserializeHand(problem.hand),
+    bestShanten: problem.bestShanten
+  };
+}
+
+function nanikiruResultEmbed(problem: {
+  questionId: string;
+  hand: string;
+  bestShanten: number;
+  shantenFilter: string;
+  honorTileMode: string;
+  answers: Array<{ tile: number }>;
+}) {
+  const question = storedQuestion(problem);
+  const counts = new Map<Tile, number>();
+  for (const answer of problem.answers) {
+    counts.set(answer.tile, (counts.get(answer.tile) ?? 0) + 1);
+  }
+
+  return new EmbedBuilder()
+    .setTitle("平面何切る 回答結果")
+    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${problem.answers.length}`)
+    .addFields(
+      {
+        name: "出題条件",
+        value: `${shantenFilterLabels[problem.shantenFilter as ShantenFilter] ?? problem.shantenFilter} / ${
+          honorTileModeLabels[problem.honorTileMode as HonorTileMode] ?? problem.honorTileMode
+        }`,
+        inline: false
+      },
+      { name: "回答分布", value: formatNanikiruCounts(counts), inline: false }
+    )
+    .setFooter({ text: `Question ID: ${problem.questionId}` });
+}
+
+async function ensureGuild(guildId: string) {
+  await prisma.guild.upsert({
+    where: { guildId },
+    create: { guildId },
+    update: {}
+  });
+}
+
+async function resolveSendableChannel(channelId: string) {
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (channel?.isTextBased() && "send" in channel) {
+    return channel;
+  }
+  return null;
+}
+
+async function resolveNanikiruPostChannel(interaction: ChatInputCommandInteraction, configuredChannelId?: string | null) {
+  const selectedChannel = interaction.options.getChannel("channel");
+  if (selectedChannel) {
+    return resolveSendableChannel(selectedChannel.id);
+  }
+  if (configuredChannelId) {
+    return resolveSendableChannel(configuredChannelId);
+  }
+  return interaction.channel?.isTextBased() && "send" in interaction.channel ? interaction.channel : null;
+}
+
+function scheduleNanikiruClose(questionId: string, closesAt: Date) {
+  const existing = nanikiruCloseTimers.get(questionId);
+  if (existing) {
+    clearTimeout(existing);
+  }
+
+  const delayMs = Math.max(0, closesAt.getTime() - Date.now());
+  const timer = setTimeout(() => {
+    closeNanikiruQuestion(questionId).catch((error) => console.error(error));
+  }, delayMs);
+  timer.unref();
+  nanikiruCloseTimers.set(questionId, timer);
+}
+
+async function schedulePendingNanikiruQuestions() {
+  const problems = await prisma.nanikiruProblem.findMany({
+    where: {
+      closedAt: null
+    },
+    select: {
+      questionId: true,
+      closesAt: true
+    }
+  });
+
+  for (const problem of problems) {
+    scheduleNanikiruClose(problem.questionId, problem.closesAt);
+  }
+}
+
+async function closeNanikiruQuestion(questionId: string) {
+  const updated = await prisma.nanikiruProblem.updateMany({
+    where: {
+      questionId,
+      closedAt: null
+    },
+    data: {
+      closedAt: new Date()
+    }
+  });
+  if (updated.count === 0) {
+    return;
+  }
+
+  const timer = nanikiruCloseTimers.get(questionId);
+  if (timer) {
+    clearTimeout(timer);
+    nanikiruCloseTimers.delete(questionId);
+  }
+
+  const problem = await prisma.nanikiruProblem.findUnique({
+    where: { questionId },
+    include: { answers: true }
+  });
+  if (!problem) {
+    return;
+  }
+
+  const question = storedQuestion(problem);
+  const messageChannel = await resolveSendableChannel(problem.questionChannelId);
+  const message = await messageChannel?.messages.fetch(problem.messageId).catch(() => null);
+  await message?.edit({
+    embeds: [closedNanikiruEmbed(question, problem.answers.length)],
+    components: []
+  }).catch(() => undefined);
+
+  const resultChannel = await resolveSendableChannel(problem.resultChannelId ?? problem.questionChannelId);
+  await resultChannel?.send({
+    embeds: [nanikiruResultEmbed(problem)]
+  }).catch((error) => console.error(error));
 }
 
 async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildId = requireGuildId(interaction);
   const filter = parseShantenFilter(interaction.options.getString("shanten"));
-  const question = generateNanikiruQuestion(filter);
-  const selectedChannel = interaction.options.getChannel("channel");
-  const targetChannel = selectedChannel ? await interaction.client.channels.fetch(selectedChannel.id) : interaction.channel;
+  const honorTileMode = parseHonorTileMode(interaction.options.getString("honors"));
+  const question = generateNanikiruQuestion(filter, honorTileMode);
+  const setting = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId } });
+  const targetChannel = await resolveNanikiruPostChannel(interaction, setting?.questionChannelId);
 
-  if (!targetChannel?.isTextBased() || !("send" in targetChannel)) {
+  if (!targetChannel) {
     await interaction.editReply("投稿先にはテキストチャンネルを指定してください。");
     return;
   }
 
   const questionId = randomUUID();
+  const closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const message = await targetChannel.send({
     embeds: [nanikiruEmbed(question, 0)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
-  nanikiruQuestions.set(questionId, {
-    guildId,
-    question,
-    message,
-    answers: new Map()
+
+  await ensureGuild(guildId);
+  await prisma.nanikiruProblem.create({
+    data: {
+      questionId,
+      guildId,
+      hand: serializeHand(question.hand),
+      bestShanten: question.bestShanten,
+      shantenFilter: filter,
+      honorTileMode,
+      questionChannelId: targetChannel.id,
+      resultChannelId: setting?.resultChannelId ?? setting?.questionChannelId ?? targetChannel.id,
+      messageId: message.id,
+      closesAt
+    }
   });
-  setTimeout(() => nanikiruQuestions.delete(questionId), 24 * 60 * 60 * 1000).unref();
+  scheduleNanikiruClose(questionId, closesAt);
 
   const destination = targetChannel.id === interaction.channelId ? "このチャンネル" : `<#${targetChannel.id}>`;
-  await interaction.editReply(`${destination} に ${shantenFilterLabels[filter]} の何切るを投稿しました。`);
+  await interaction.editReply(`${destination} に ${shantenFilterLabels[filter]} / ${honorTileModeLabels[honorTileMode]} の何切るを投稿しました。`);
+}
+
+async function handleNanikiruConfigCommand(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!canManageNames(interaction)) {
+    await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
+    return;
+  }
+
+  const questionChannel = interaction.options.getChannel("question_channel");
+  const resultChannel = interaction.options.getChannel("result_channel");
+  await ensureGuild(guildId);
+
+  if (!questionChannel && !resultChannel) {
+    const setting = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId } });
+    await interaction.editReply(
+      `何切る設定\n問題投稿: ${setting?.questionChannelId ? `<#${setting.questionChannelId}>` : "未設定"}\n結果投稿: ${
+        setting?.resultChannelId ? `<#${setting.resultChannelId}>` : "未設定（問題投稿チャンネル）"
+      }`
+    );
+    return;
+  }
+
+  const data = {
+    ...(questionChannel ? { questionChannelId: questionChannel.id } : {}),
+    ...(resultChannel ? { resultChannelId: resultChannel.id } : {})
+  };
+  const setting = await prisma.nanikiruGuildSetting.upsert({
+    where: { guildId },
+    create: {
+      guildId,
+      questionChannelId: questionChannel?.id,
+      resultChannelId: resultChannel?.id
+    },
+    update: data
+  });
+
+  await interaction.editReply(
+    `何切る設定を更新しました。\n問題投稿: ${setting.questionChannelId ? `<#${setting.questionChannelId}>` : "未設定"}\n結果投稿: ${
+      setting.resultChannelId ? `<#${setting.resultChannelId}>` : "未設定（問題投稿チャンネル）"
+    }`
+  );
 }
 
 async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
@@ -735,8 +939,11 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     return;
   }
 
-  const state = nanikiruQuestions.get(questionId);
-  if (!state || state.guildId !== interaction.guildId) {
+  const problem = await prisma.nanikiruProblem.findUnique({
+    where: { questionId },
+    include: { answers: true }
+  });
+  if (!problem || problem.guildId !== interaction.guildId) {
     await interaction.reply({
       content: "この問題の受付は終了しました。新しく `/mjs nanikiru` を実行してください。",
       flags: MessageFlags.Ephemeral
@@ -744,24 +951,54 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     return;
   }
 
+  if (problem.closedAt || problem.closesAt.getTime() <= Date.now()) {
+    await closeNanikiruQuestion(questionId);
+    await interaction.reply({
+      content: "この問題の回答受付は終了しました。",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  const question = storedQuestion(problem);
   const selectedTile = Number(interaction.values[0]);
-  if (!Number.isInteger(selectedTile) || !uniqueDiscardTiles(state.question.hand).includes(selectedTile)) {
+  if (!Number.isInteger(selectedTile) || !uniqueDiscardTiles(question.hand).includes(selectedTile)) {
     await interaction.reply({ content: "不正な回答です。", flags: MessageFlags.Ephemeral });
     return;
   }
 
-  const previousAnswer = state.answers.get(interaction.user.id);
-  state.answers.set(interaction.user.id, selectedTile);
-  await state.message.edit({
-    embeds: [nanikiruEmbed(state.question, state.answers.size)],
-    components: [nanikiruAnswerRow(questionId, state.question.hand)]
+  const previousAnswer = problem.answers.find((answer) => answer.userId === interaction.user.id)?.tile;
+  await prisma.nanikiruAnswer.upsert({
+    where: {
+      questionId_userId: {
+        questionId,
+        userId: interaction.user.id
+      }
+    },
+    create: {
+      questionId,
+      userId: interaction.user.id,
+      tile: selectedTile
+    },
+    update: {
+      tile: selectedTile
+    }
   });
 
+  const answers = await prisma.nanikiruAnswer.findMany({
+    where: { questionId }
+  });
+  await interaction.message.edit({
+    embeds: [nanikiruEmbed(question, answers.length)],
+    components: [nanikiruAnswerRow(questionId, question.hand)]
+  });
+
+  const answerMap = new Map(answers.map((answer) => [answer.userId, answer.tile]));
   const answerText = previousAnswer === undefined
     ? `あなたの回答: ${tileLabel(selectedTile)}`
     : `あなたの回答を ${tileLabel(previousAnswer)} から ${tileLabel(selectedTile)} に変更しました。`;
   await interaction.reply({
-    content: `${answerText}\n現在の回答分布: ${nanikiruDistribution(state.answers)}`,
+    content: `${answerText}\n現在の回答分布: ${nanikiruDistribution(answerMap)}`,
     flags: MessageFlags.Ephemeral
   });
 }
@@ -921,6 +1158,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs awards` シーズン表彰を表示",
     "`/mjs export` CSVを出力",
     "`/mjs nanikiru` 平面何切るを出題",
+    "`/mjs nanikiru_config` 何切るの投稿先を設定",
     "`/mjs log` ユーザー別の対局履歴を表示",
     "`/mjs matches` サーバー全体の対局一覧を表示",
     "`/mjs del` 指定した対局を削除",
@@ -969,6 +1207,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleExport(interaction);
   } else if (subcommand === "nanikiru") {
     await handleNanikiruCommand(interaction);
+  } else if (subcommand === "nanikiru_config") {
+    await handleNanikiruConfigCommand(interaction);
   } else if (subcommand === "del") {
     await handleDeleteCommand(interaction);
   } else if (subcommand === "undo") {
@@ -984,6 +1224,7 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
 
 client.once(Events.ClientReady, (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
+  schedulePendingNanikiruQuestions().catch((error) => console.error(error));
 });
 
 client.on(Events.Debug, (message) => {

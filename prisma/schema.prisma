@@ -8,11 +8,13 @@ datasource db {
 }
 
 model Guild {
-  guildId   String        @id @map("guild_id")
-  users     User[]
-  profiles  UserProfile[]
-  matches   Match[]
-  createdAt DateTime      @default(now()) @map("created_at")
+  guildId          String                 @id @map("guild_id")
+  users            User[]
+  profiles         UserProfile[]
+  matches          Match[]
+  nanikiruSetting  NanikiruGuildSetting?
+  nanikiruProblems NanikiruProblem[]
+  createdAt        DateTime               @default(now()) @map("created_at")
 
   @@map("guilds")
 }
@@ -136,4 +138,46 @@ model HandPlayerStat {
   @@index([userId])
   @@index([won, dealtIn])
   @@map("hand_player_stats")
+}
+
+model NanikiruGuildSetting {
+  guildId           String   @id @map("guild_id")
+  questionChannelId String?  @map("question_channel_id")
+  resultChannelId   String?  @map("result_channel_id")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+  guild             Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@map("nanikiru_guild_settings")
+}
+
+model NanikiruProblem {
+  questionId        String           @id @map("question_id")
+  guildId           String           @map("guild_id")
+  hand              String
+  bestShanten       Int              @map("best_shanten")
+  shantenFilter     String           @map("shanten_filter")
+  honorTileMode     String           @map("honor_tile_mode")
+  questionChannelId String           @map("question_channel_id")
+  resultChannelId   String?          @map("result_channel_id")
+  messageId         String           @map("message_id")
+  closesAt          DateTime         @map("closes_at")
+  closedAt          DateTime?        @map("closed_at")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  guild             Guild            @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  answers           NanikiruAnswer[]
+
+  @@index([guildId, closesAt])
+  @@index([closedAt, closesAt])
+  @@map("nanikiru_problems")
+}
+
+model NanikiruAnswer {
+  questionId String          @map("question_id")
+  userId     String          @map("user_id")
+  tile       Int
+  updatedAt  DateTime        @updatedAt @map("updated_at")
+  question   NanikiruProblem @relation(fields: [questionId], references: [questionId], onDelete: Cascade)
+
+  @@id([questionId, userId])
+  @@map("nanikiru_answers")
 }

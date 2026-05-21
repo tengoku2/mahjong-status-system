@@ -92,10 +92,35 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
           { name: "二向聴", value: "ryanshanten" }
         )
     )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option
+        .setName("honors")
+        .setDescription("字牌を出題に含めるか")
+        .addChoices(
+          { name: "字牌あり", value: "include" },
+          { name: "字牌なし", value: "exclude" }
+        )
+    )
     .addChannelOption((option: SlashCommandChannelOption) =>
       option
         .setName("channel")
-        .setDescription("問題を投稿する専用チャンネル。未指定なら現在のチャンネル")
+        .setDescription("今回だけ問題を投稿するチャンネル。未指定なら設定チャンネルまたは現在のチャンネル")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    );
+}
+
+function addNanikiruConfigOptions(command: SlashCommandSubcommandBuilder) {
+  return command
+    .addChannelOption((option: SlashCommandChannelOption) =>
+      option
+        .setName("question_channel")
+        .setDescription("何切る問題を投稿するチャンネル")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    )
+    .addChannelOption((option: SlashCommandChannelOption) =>
+      option
+        .setName("result_channel")
+        .setDescription("24時間後の回答結果を投稿するチャンネル。未指定なら変更しません")
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     );
 }
@@ -128,6 +153,7 @@ export const mjsCommand = new SlashCommandBuilder()
     addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))
   )
   .addSubcommand((command) => addNanikiruOptions(command.setName("nanikiru").setDescription("平面何切るを出題します")))
+  .addSubcommand((command) => addNanikiruConfigOptions(command.setName("nanikiru_config").setDescription("何切るの投稿先を設定します")))
   .addSubcommand((command) =>
     command
       .setName("del")

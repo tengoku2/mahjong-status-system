@@ -84,8 +84,14 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
   return command
     .addStringOption((option: SlashCommandStringOption) =>
       option
+        .setName("hand")
+        .setDescription("手動出題する14枚手牌。例: 123m456p3566s東南")
+        .setMaxLength(80)
+    )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option
         .setName("shanten")
-        .setDescription("出題する向聴数")
+        .setDescription("ランダム出題する向聴数。hand指定時は表示用に自動計算します")
         .addChoices(
           { name: "指定なし", value: "any" },
           { name: "一向聴", value: "iishanten" },

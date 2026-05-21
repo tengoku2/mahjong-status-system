@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   bestShantenAfterDiscard,
   calculateShanten,
+  createNanikiruQuestionFromHand,
   formatHand,
   generateNanikiruQuestion,
+  parseHandInput,
   parseHonorTileMode,
   tileLabel,
   uniqueDiscardTiles
@@ -31,6 +33,18 @@ describe("nanikiru", () => {
     expect(uniqueDiscardTiles([0, 0, 1, 9, 9, 27])).toEqual([0, 1, 9, 27]);
   });
 
+  it("parses manual hand input", () => {
+    expect(formatHand(parseHandInput("123m456p3566s東南白中"))).toBe("123m 456p 3566s 東南白中");
+    expect(formatHand(parseHandInput("123萬456筒3566索東南白中"))).toBe("123m 456p 3566s 東南白中");
+    expect(formatHand(parseHandInput("123m 456p 3566s 東南白中"))).toBe("123m 456p 3566s 東南白中");
+  });
+
+  it("rejects invalid manual hand input", () => {
+    expect(() => parseHandInput("123m456p356s東南")).toThrow("14枚");
+    expect(() => parseHandInput("11111m234p3566s東南")).toThrow("5枚以上");
+    expect(() => parseHandInput("123m456p3566s東南白中12")).toThrow("数字の後に m/p/s");
+  });
+
   it("calculates shanten for complete-adjacent 13 tile hands", () => {
     expect(calculateShanten([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 27])).toBe(0);
     expect(calculateShanten([0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 27, 28])).toBe(1);
@@ -39,6 +53,12 @@ describe("nanikiru", () => {
   it("calculates best shanten after discard from a 14 tile hand", () => {
     const hand = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 27, 28];
     expect(bestShantenAfterDiscard(hand)).toBe(0);
+  });
+
+  it("creates a manual nanikiru question", () => {
+    const question = createNanikiruQuestionFromHand("123m456p3566s東南白中");
+    expect(formatHand(question.hand)).toBe("123m 456p 3566s 東南白中");
+    expect(question.bestShanten).toBeGreaterThanOrEqual(0);
   });
 
   it("generates filtered hands", () => {

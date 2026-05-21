@@ -84,6 +84,61 @@ export function generateNanikiruQuestion(filter: ShantenFilter = "any", honorTil
   throw new Error(`${shantenFilterLabels[filter]}の問題を生成できませんでした。もう一度実行してください。`);
 }
 
+export function createNanikiruQuestionFromHand(input: string): NanikiruQuestion {
+  const hand = parseHandInput(input);
+  return {
+    hand: hand.sort(compareTiles),
+    bestShanten: bestShantenAfterDiscard(hand)
+  };
+}
+
+export function parseHandInput(input: string): Tile[] {
+  const normalized = input.replace(/\s+/g, "").replace(/萬/g, "m").replace(/筒/g, "p").replace(/索/g, "s");
+  const hand: Tile[] = [];
+  let digits = "";
+
+  for (const char of normalized) {
+    if (/^[1-9]$/.test(char)) {
+      digits += char;
+      continue;
+    }
+
+    if (char === "m" || char === "p" || char === "s") {
+      if (!digits) {
+        throw new Error("数牌は `123m` のように数字の後に m/p/s を付けて入力してください。");
+      }
+      const offset = char === "m" ? 0 : char === "p" ? 9 : 18;
+      for (const digit of digits) {
+        hand.push(offset + Number(digit) - 1);
+      }
+      digits = "";
+      continue;
+    }
+
+    const honorTile = parseHonorTile(char);
+    if (honorTile !== null) {
+      if (digits) {
+        throw new Error("字牌の前に未指定の数字があります。数牌は `123m` のように入力してください。");
+      }
+      hand.push(honorTile);
+      continue;
+    }
+
+    throw new Error(`未対応の牌表記です: ${char}`);
+  }
+
+  if (digits) {
+    throw new Error("数牌は `123m` のように数字の後に m/p/s を付けて入力してください。");
+  }
+
+  if (hand.length !== 14) {
+    throw new Error(`手牌は14枚で入力してください。現在は${hand.length}枚です。`);
+  }
+
+  toCounts(hand);
+  return hand.sort(compareTiles);
+}
+
 export function bestShantenAfterDiscard(hand: Tile[]): number {
   if (hand.length !== 14) {
     throw new Error("何切るの手牌は14枚である必要があります。");
@@ -140,6 +195,20 @@ function formatSuit(sortedHand: Tile[], offset: number, suffix: "m" | "p" | "s")
 
 function isHonorTile(tile: Tile): boolean {
   return tile >= 27;
+}
+
+function parseHonorTile(char: string): Tile | null {
+  const honors: Record<string, Tile> = {
+    東: 27,
+    南: 28,
+    西: 29,
+    北: 30,
+    白: 31,
+    發: 32,
+    発: 32,
+    中: 33
+  };
+  return honors[char] ?? null;
 }
 
 function removeOneTile(hand: Tile[], tile: Tile): Tile[] {

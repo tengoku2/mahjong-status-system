@@ -23,6 +23,7 @@ import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
 import {
+  createNanikiruQuestionFromHand,
   formatHand,
   generateNanikiruQuestion,
   honorTileModeLabels,
@@ -746,6 +747,9 @@ async function nanikiruResultEmbed(problem: {
 }) {
   const question = storedQuestion(problem);
   const distribution = await nanikiruDistributionWithNames(problem.guildId, problem.answers);
+  const shantenFilterLabel = problem.shantenFilter === "manual"
+    ? "手動入力"
+    : shantenFilterLabels[problem.shantenFilter as ShantenFilter] ?? problem.shantenFilter;
 
   return new EmbedBuilder()
     .setTitle("平面何切る 回答結果")
@@ -753,7 +757,7 @@ async function nanikiruResultEmbed(problem: {
     .addFields(
       {
         name: "出題条件",
-        value: `${shantenFilterLabels[problem.shantenFilter as ShantenFilter] ?? problem.shantenFilter} / ${
+        value: `${shantenFilterLabel} / ${
           honorTileModeLabels[problem.honorTileMode as HonorTileMode] ?? problem.honorTileMode
         }`,
         inline: false
@@ -867,7 +871,8 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const guildId = requireGuildId(interaction);
   const filter = parseShantenFilter(interaction.options.getString("shanten"));
   const honorTileMode = parseHonorTileMode(interaction.options.getString("honors"));
-  const question = generateNanikiruQuestion(filter, honorTileMode);
+  const handInput = interaction.options.getString("hand");
+  const question = handInput ? createNanikiruQuestionFromHand(handInput) : generateNanikiruQuestion(filter, honorTileMode);
   const setting = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId } });
   const targetChannel = await resolveNanikiruPostChannel(interaction, setting?.questionChannelId);
 
@@ -890,7 +895,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       guildId,
       hand: serializeHand(question.hand),
       bestShanten: question.bestShanten,
-      shantenFilter: filter,
+      shantenFilter: handInput ? "manual" : filter,
       honorTileMode,
       questionChannelId: targetChannel.id,
       resultChannelId: setting?.resultChannelId ?? setting?.questionChannelId ?? targetChannel.id,
@@ -901,7 +906,8 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   scheduleNanikiruClose(questionId, closesAt);
 
   const destination = targetChannel.id === interaction.channelId ? "このチャンネル" : `<#${targetChannel.id}>`;
-  await interaction.editReply(`${destination} に ${shantenFilterLabels[filter]} / ${honorTileModeLabels[honorTileMode]} の何切るを投稿しました。`);
+  const conditionText = handInput ? "手動入力" : `${shantenFilterLabels[filter]} / ${honorTileModeLabels[honorTileMode]}`;
+  await interaction.editReply(`${destination} に ${conditionText} の何切るを投稿しました。`);
 }
 
 async function handleNanikiruConfigCommand(interaction: ChatInputCommandInteraction) {

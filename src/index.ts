@@ -689,19 +689,35 @@ function nanikiruAnswerRow(questionId: string, hand: Tile[]) {
   );
 }
 
-function nanikiruDistribution(answers: Map<string, Tile>): string {
-  const counts = new Map<Tile, number>();
-  for (const tile of answers.values()) {
-    counts.set(tile, (counts.get(tile) ?? 0) + 1);
-  }
-  return formatNanikiruCounts(counts);
-}
-
 function formatNanikiruCounts(counts: Map<Tile, number>): string {
   const lines = [...counts.entries()]
     .sort(([leftTile, leftCount], [rightTile, rightCount]) => rightCount - leftCount || leftTile - rightTile)
     .map(([tile, count]) => `${tileLabel(tile)} ${count}票`);
   return lines.length ? lines.join(" / ") : "回答なし";
+}
+
+async function nanikiruDistributionWithNames(guildId: string, answers: Array<{ userId: string; tile: number }>): Promise<string> {
+  if (answers.length === 0) {
+    return "回答なし";
+  }
+
+  const grouped = new Map<Tile, string[]>();
+  for (const answer of answers) {
+    const names = grouped.get(answer.tile) ?? [];
+    names.push(await displayNameForUserId(guildId, answer.userId));
+    grouped.set(answer.tile, names);
+  }
+
+  return [...grouped.entries()]
+    .sort(([leftTile, leftNames], [rightTile, rightNames]) => rightNames.length - leftNames.length || leftTile - rightTile)
+    .map(([tile, names]) => `${tileLabel(tile)} ${names.length}票: ${names.join(", ")}`)
+    .join("\n");
+}
+
+async function displayNameForUserId(guildId: string, userId: string): Promise<string> {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  const member = await guild?.members.fetch(userId).catch(() => null);
+  return member?.displayName ?? `User-${userId.slice(-4)}`;
 }
 
 function serializeHand(hand: Tile[]): string {
@@ -719,19 +735,17 @@ function storedQuestion(problem: { hand: string; bestShanten: number }): Nanikir
   };
 }
 
-function nanikiruResultEmbed(problem: {
+async function nanikiruResultEmbed(problem: {
   questionId: string;
+  guildId: string;
   hand: string;
   bestShanten: number;
   shantenFilter: string;
   honorTileMode: string;
-  answers: Array<{ tile: number }>;
+  answers: Array<{ userId: string; tile: number }>;
 }) {
   const question = storedQuestion(problem);
-  const counts = new Map<Tile, number>();
-  for (const answer of problem.answers) {
-    counts.set(answer.tile, (counts.get(answer.tile) ?? 0) + 1);
-  }
+  const distribution = await nanikiruDistributionWithNames(problem.guildId, problem.answers);
 
   return new EmbedBuilder()
     .setTitle("平面何切る 回答結果")
@@ -744,7 +758,7 @@ function nanikiruResultEmbed(problem: {
         }`,
         inline: false
       },
-      { name: "回答分布", value: formatNanikiruCounts(counts), inline: false }
+      { name: "回答分布", value: distribution, inline: false }
     )
     .setFooter({ text: `Question ID: ${problem.questionId}` });
 }
@@ -844,7 +858,7 @@ async function closeNanikiruQuestion(questionId: string) {
 
   const resultChannel = await resolveSendableChannel(problem.resultChannelId ?? problem.questionChannelId);
   await resultChannel?.send({
-    embeds: [nanikiruResultEmbed(problem)]
+    embeds: [await nanikiruResultEmbed(problem)]
   }).catch((error) => console.error(error));
 }
 
@@ -993,12 +1007,12 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 
-  const answerMap = new Map(answers.map((answer) => [answer.userId, answer.tile]));
+  const distribution = await nanikiruDistributionWithNames(problem.guildId, answers);
   const answerText = previousAnswer === undefined
     ? `あなたの回答: ${tileLabel(selectedTile)}`
     : `あなたの回答を ${tileLabel(previousAnswer)} から ${tileLabel(selectedTile)} に変更しました。`;
   await interaction.reply({
-    content: `${answerText}\n現在の回答分布: ${nanikiruDistribution(answerMap)}`,
+    content: `${answerText}\n現在の回答分布:\n${distribution}`,
     flags: MessageFlags.Ephemeral
   });
 }

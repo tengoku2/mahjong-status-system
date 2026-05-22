@@ -80,6 +80,21 @@ function addCountOption(command: SlashCommandSubcommandBuilder, max = 50) {
   );
 }
 
+function addChannelOption(
+  command: SlashCommandSubcommandBuilder,
+  name: string,
+  description: string,
+  required = false
+) {
+  return command.addChannelOption((option: SlashCommandChannelOption) =>
+    option
+      .setName(name)
+      .setDescription(description)
+      .setRequired(required)
+      .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+  );
+}
+
 function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
   return command
     .addStringOption((option: SlashCommandStringOption) =>
@@ -142,19 +157,11 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
 }
 
 function addNanikiruConfigOptions(command: SlashCommandSubcommandBuilder) {
-  return command
-    .addChannelOption((option: SlashCommandChannelOption) =>
-      option
-        .setName("question_channel")
-        .setDescription("何切る問題を投稿するチャンネル")
-        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-    )
-    .addChannelOption((option: SlashCommandChannelOption) =>
-      option
-        .setName("result_channel")
-        .setDescription("24時間後の回答結果を投稿するチャンネル。未指定なら変更しません")
-        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
-    );
+  return addChannelOption(
+    addChannelOption(command, "question_channel", "問題を投稿するチャンネル"),
+    "result_channel",
+    "結果を投稿するチャンネル。未指定なら未設定のまま"
+  );
 }
 
 export const mjsCommand = new SlashCommandBuilder()
@@ -184,8 +191,14 @@ export const mjsCommand = new SlashCommandBuilder()
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))
   )
-  .addSubcommand((command) => addNanikiruOptions(command.setName("nanikiru").setDescription("平面何切るを出題します")))
-  .addSubcommand((command) => addNanikiruConfigOptions(command.setName("nanikiru_config").setDescription("何切るの投稿先を設定します")))
+  .addSubcommand((command) =>
+    addChannelOption(command.setName("season_lock").setDescription("シーズンロック中に運営が閲覧するチャンネルを設定します"), "channel", "運営閲覧チャンネル", true)
+  )
+  .addSubcommand((command) =>
+    command.setName("season_unlock").setDescription("直前シーズンのロックを解除します")
+  )
+  .addSubcommand((command) => addNanikiruOptions(command.setName("nanikiru").setDescription("何切る問題を出題します")))
+  .addSubcommand((command) => addNanikiruConfigOptions(command.setName("nanikiru_config").setDescription("何切る問題の設定先を保存します")))
   .addSubcommand((command) =>
     command
       .setName("del")

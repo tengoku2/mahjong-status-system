@@ -45,7 +45,8 @@ import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, se
 import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRange, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, seasonAwards } from "./services.js";
+import { formatPenaltySuffix, isManager, lockStateForPeriod, lockStateForSeason, latestConcludedSeason } from "./season-lock.js";
+import { aggregateStats, buildMvpRankingFromResults, createMatch, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type MvpRankingEntry, type RankingEntry } from "./services.js";
 import type { MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -165,6 +166,10 @@ function isCurrentSeasonWindow(season: { code: SeasonCode; seasonYear: number } 
   return current.code === season.code && current.seasonYear === season.seasonYear;
 }
 
+function isMvpRankingEntry(entry: RankingEntry | MvpRankingEntry): entry is MvpRankingEntry {
+  return "rawTotalPoint" in entry;
+}
+
 function tournamentOption(interaction: ChatInputCommandInteraction): string | undefined {
   const tournamentName = interaction.options.getString("tournament_name")?.trim();
   return tournamentName || undefined;
@@ -249,6 +254,71 @@ function canManageNames(interaction: ChatInputCommandInteraction): boolean {
   return isGuildManager || isDeveloper;
 }
 
+async function getSeasonLockSetting(guildId: string) {
+  return prisma.seasonLockSetting.findUnique({
+    where: {
+      guildId
+    }
+  });
+}
+
+function hasManagerAccess(interaction: ChatInputCommandInteraction): boolean {
+  return isManager(
+    interaction.user.id,
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ?? false,
+    developerUserIds
+  );
+}
+
+async function ensureSeasonLockAccess(
+  interaction: ChatInputCommandInteraction,
+  scope: "ranking" | "self_stats_only" | "full_lock",
+  options: {
+    season?: { code: SeasonCode; seasonYear: number; start: Date; end: Date } | null;
+    period?: Period | null;
+    selfUserId?: string;
+  }
+): Promise<boolean> {
+  const guildId = requireGuildId(interaction);
+  const setting = await getSeasonLockSetting(guildId);
+  const lockState = options.season
+    ? lockStateForSeason(options.season, setting)
+    : lockStateForPeriod(options.period ?? null, setting);
+
+  if (!lockState.locked) {
+    return true;
+  }
+
+  const isManagerUser = hasManagerAccess(interaction);
+  const inAdminChannel = Boolean(setting?.adminChannelId && interaction.channelId === setting.adminChannelId);
+
+  if (isManagerUser && inAdminChannel) {
+    return true;
+  }
+
+  if (scope === "self_stats_only" && options.selfUserId === interaction.user.id) {
+    return true;
+  }
+
+  if (isManagerUser && !setting?.adminChannelId) {
+    await interaction.editReply("シーズンロック中の運営閲覧チャンネルが未設定です。`/mjs season_lock` で設定してください。");
+    return false;
+  }
+
+  if (isManagerUser) {
+    await interaction.editReply("シーズンロック中のデータは、設定済みの運営閲覧チャンネルでのみ確認できます。");
+    return false;
+  }
+
+  if (scope === "self_stats_only") {
+    await interaction.editReply("シーズン終盤のため、この期間の stats は自分の成績のみ確認できます。");
+    return false;
+  }
+
+  await interaction.editReply("シーズン終盤のため、この期間のデータは現在ロック中です。");
+  return false;
+}
+
 async function handleRecordCommand(interaction: ChatInputCommandInteraction) {
   requireGuildId(interaction);
   const type = typeOption(interaction);
@@ -329,6 +399,9 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
   const user = interaction.options.getUser("user") ?? interaction.user;
   const type = typeOption(interaction);
   const period = periodOption(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "self_stats_only", { period, selfUserId: user.id }))) {
+    return;
+  }
   const tournamentName = tournamentOption(interaction);
   const stats = await aggregateStats(guildId, type, period, user.id, tournamentName);
   const name = await displayName(guildId, await fetchMember(interaction, user.id), user.id);
@@ -369,6 +442,9 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
 async function handleHistory(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "full_lock", { period: "all" }))) {
+    return;
+  }
   const user = interaction.options.getUser("user") ?? interaction.user;
   const type = typeOption(interaction);
   const count = interaction.options.getInteger("count") ?? 10;
@@ -392,6 +468,9 @@ async function handleHistory(interaction: ChatInputCommandInteraction) {
 async function handleMatchList(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "full_lock", { period: "all" }))) {
+    return;
+  }
   const type = optionalTypeOption(interaction);
   const count = interaction.options.getInteger("count") ?? 10;
   const tournamentName = tournamentOption(interaction);
@@ -454,29 +533,60 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const rankingScope = type ? `\u7a2e\u5225: ${typeLabel(type)}` : "\u5bfe\u8c61: 3\u4eba\u534a\u8358 + 4\u4eba\u534a\u8358";
   const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "ranking", { season, period }))) {
+    return;
+  }
   const showMovement = Boolean(season && isCurrentSeasonWindow(season));
-  const rankingData = season
-    ? showMovement
+  const showMvpPenalty = !type && (season ? isCurrentSeasonWindow(season) : true);
+  let computedRankingData: {
+    current: Array<RankingEntry | MvpRankingEntry>;
+    previous: Array<RankingEntry | MvpRankingEntry>;
+    latestMatchId: string | null;
+  };
+
+  if (!type && season) {
+    const resultSet = showMovement
+      ? await resultsWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
+      : {
+          currentResults: await getResultsForDateRange(guildId, rankingTypes, season.start, season.end, undefined, tournamentName),
+          previousResults: [],
+          latestMatchId: null
+        };
+    computedRankingData = {
+      current: buildMvpRankingFromResults(resultSet.currentResults),
+      previous: buildMvpRankingFromResults(resultSet.previousResults),
+      latestMatchId: resultSet.latestMatchId
+    };
+  } else if (season) {
+    computedRankingData = showMovement
       ? await rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
       : {
           current: await rankingForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName),
           previous: [],
           latestMatchId: null
-        }
-    : {
-        current: type
-          ? await ranking(guildId, type, period!, tournamentName)
-          : await rankingByTypes(guildId, rankingTypes, period!, tournamentName),
-        previous: [],
-        latestMatchId: null
-      };
-  const movements = showMovement ? calculateRankMovements(rankingData.current, rankingData.previous, true) : new Map();
+        };
+  } else {
+    computedRankingData = {
+      current: type
+        ? await ranking(guildId, type, period!, tournamentName)
+        : buildMvpRankingFromResults(await getResultsForPeriodByTypes(guildId, rankingTypes, period!, undefined, tournamentName)),
+      previous: [],
+      latestMatchId: null
+    };
+  }
+  const movements = showMovement ? calculateRankMovements(computedRankingData.current, computedRankingData.previous, true) : new Map();
   const lines = await Promise.all(
-    rankingData.current.slice(0, 20).map(async (entry, index) => {
+    computedRankingData.current.slice(0, 20).map(async (entry, index) => {
       const member = await fetchMember(interaction, entry.userId);
       const name = await displayName(guildId, member, entry.userId);
       const movement = showMovement ? `${movementSymbol(movements.get(entry.userId) ?? "same")} ` : "";
-      return `${index + 1}. ${movement}${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}\u6226 / \u5e73\u5747${formatPoint(entry.averagePoint)}pt / \u5e73\u5747\u9806\u4f4d${entry.averageRank.toFixed(2)})`;
+      const displayPoint =
+        isMvpRankingEntry(entry)
+          ? showMvpPenalty
+            ? `${formatPoint(entry.rawTotalPoint)}pt${formatPenaltySuffix(entry.penaltyPoint)}`
+            : `${formatPoint(entry.totalPoint)}pt`
+          : `${formatPoint(entry.totalPoint)}pt`;
+      return `${index + 1}. ${movement}${name} ${displayPoint} (${entry.games}\u6226 / \u5e73\u5747${formatPoint(entry.averagePoint)}pt / \u5e73\u5747\u9806\u4f4d${entry.averageRank.toFixed(2)})`;
     })
   );
 
@@ -499,6 +609,9 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
   const guildId = requireGuildId(interaction);
   const type = typeOption(interaction);
   const { season, period } = resolveLeaderboardWindow(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "full_lock", { season, period }))) {
+    return;
+  }
   const tournamentName = tournamentOption(interaction);
   const currentRecords = season
     ? await recordsForDateRange(guildId, type, season.start, season.end, tournamentName)
@@ -529,25 +642,6 @@ ${matchText(record.playedAt)}` ,
     empty,
     "\u540d"
   );
-  const bestAverageRank = await summarizeRecordList<PlayerRecord>(
-    currentRecords.bestAverageRank,
-    async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(2)}\u4f4d`,
-    `${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057`,
-    "\u540d"
-  );
-  const topStreak = await summarizeRecordList<PlayerRecord>(
-    currentRecords.longestTopStreak,
-    async (record) => `${await nameFor(record.userId)} ${record.value}\u9023\u7d9a`,
-    "2\u9023\u7d9a\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057",
-    "\u540d"
-  );
-  const lastAvoidanceRate = await summarizeRecordList<PlayerRecord>(
-    currentRecords.bestLastAvoidanceRate,
-    async (record) => `${await nameFor(record.userId)} ${formatPercent(record.value)}`,
-    `${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a\u306e\u8a18\u9332\u306a\u3057`,
-    "\u540d"
-  );
-
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
@@ -560,10 +654,7 @@ ${matchText(record.playedAt)}` ,
         )
         .addFields(
           { name: "\u6700\u9ad8\u30b9\u30b3\u30a2", value: highestRawScore, inline: false },
-          { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: true },
-          { name: `\u6700\u9ad8\u5e73\u5747\u9806\u4f4d(${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a)`, value: bestAverageRank, inline: true },
-          { name: "\u9023\u7d9a\u30c8\u30c3\u30d7", value: topStreak, inline: true },
-          { name: `\u30e9\u30b9\u56de\u907f\u7387(${currentRecords.qualifiedMinGames}\u6226\u4ee5\u4e0a)`, value: lastAvoidanceRate, inline: true }
+          { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: false }
         )
     ]
   });
@@ -573,6 +664,9 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
   const season = resolveSeasonOption(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "full_lock", { season }))) {
+    return;
+  }
   const awards = await seasonAwards(guildId, season.start, season.end);
   const nameCache = new Map<string, string>();
   const nameFor = async (userId: string) => {
@@ -643,6 +737,9 @@ async function handleExport(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildId = requireGuildId(interaction);
   const season = resolveSeasonOption(interaction);
+  if (!(await ensureSeasonLockAccess(interaction, "full_lock", { season }))) {
+    return;
+  }
   const exportBundle = await buildSeasonExportBundle(guildId, season);
 
   await interaction.editReply({
@@ -652,6 +749,54 @@ async function handleExport(interaction: ChatInputCommandInteraction) {
       csvAttachment(exportBundle.rankSnapshotFileName, exportBundle.rankSnapshotsCsv)
     ]
   });
+}
+
+async function handleSeasonLock(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
+    return;
+  }
+
+  const channel = interaction.options.getChannel("channel", true);
+  await prisma.seasonLockSetting.upsert({
+    where: { guildId },
+    create: {
+      guildId,
+      adminChannelId: channel.id
+    },
+    update: {
+      adminChannelId: channel.id
+    }
+  });
+
+  await interaction.editReply(`シーズンロック中の運営閲覧チャンネルを <#${channel.id}> に設定しました。`);
+}
+
+async function handleSeasonUnlock(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
+    return;
+  }
+
+  const season = latestConcludedSeason();
+  await prisma.seasonLockSetting.upsert({
+    where: { guildId },
+    create: {
+      guildId,
+      unlockedSeasonCode: season.code,
+      unlockedSeasonYear: season.seasonYear
+    },
+    update: {
+      unlockedSeasonCode: season.code,
+      unlockedSeasonYear: season.seasonYear
+    }
+  });
+
+  await interaction.editReply(`${formatSeasonLabel(season)} のロックを解除しました。`);
 }
 
 function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
@@ -1217,12 +1362,14 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
   const canUseName = canManageNames(interaction);
   const lines = [
     "`/mjs add` 対局結果を登録",
-    "`/mjs stats` 個人成績を表示",
+    "`/mjs stats` 成績を表示",
     "`/mjs rank` ランキングを表示",
     "`/mjs best` レコードを表示",
     "`/mjs awards` シーズン表彰を表示",
     "`/mjs export` CSVを出力",
-    "`/mjs nanikiru` 平面何切るを出題",
+    "`/mjs season_lock` ロック中の運営閲覧チャンネルを設定",
+    "`/mjs season_unlock` 直前シーズンのロックを解除",
+    "`/mjs nanikiru` 何切る問題を出題",
     "`/mjs nanikiru_config` 何切るの投稿先を設定",
     "`/mjs log` ユーザー別の対局履歴を表示",
     "`/mjs matches` サーバー全体の対局一覧を表示",
@@ -1233,7 +1380,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
   ];
 
   if (canUseName) {
-    lines.splice(8, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");
+    lines.splice(12, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");
   }
 
   await interaction.editReply({
@@ -1270,6 +1417,10 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleAwards(interaction);
   } else if (subcommand === "export") {
     await handleExport(interaction);
+  } else if (subcommand === "season_lock") {
+    await handleSeasonLock(interaction);
+  } else if (subcommand === "season_unlock") {
+    await handleSeasonUnlock(interaction);
   } else if (subcommand === "nanikiru") {
     await handleNanikiruCommand(interaction);
   } else if (subcommand === "nanikiru_config") {

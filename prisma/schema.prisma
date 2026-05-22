@@ -12,6 +12,7 @@ model Guild {
   users            User[]
   profiles         UserProfile[]
   matches          Match[]
+  seasonLockSetting SeasonLockSetting?
   nanikiruSetting  NanikiruGuildSetting?
   nanikiruProblems NanikiruProblem[]
   createdAt        DateTime               @default(now()) @map("created_at")
@@ -148,6 +149,17 @@ model NanikiruGuildSetting {
   guild             Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
   @@map("nanikiru_guild_settings")
+}
+
+model SeasonLockSetting {
+  guildId             String   @id @map("guild_id")
+  adminChannelId      String?  @map("admin_channel_id")
+  unlockedSeasonCode  String?  @map("unlocked_season_code")
+  unlockedSeasonYear  Int?     @map("unlocked_season_year")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  guild               Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@map("season_lock_settings")
 }
 
 model NanikiruProblem {

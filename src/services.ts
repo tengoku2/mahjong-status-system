@@ -3,6 +3,7 @@ import { calculateSeasonAwards } from "./awards.js";
 import { calculateHandStats, type HandStatsSummary } from "./hand-stats.js";
 import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
+import { seasonPenalty } from "./season-lock.js";
 import { periodDateRange, recentLimit } from "./periods.js";
 import { prisma } from "./prisma.js";
 import type { HandInput, MahjongType, Period, PlayerInput } from "./types.js";
@@ -19,6 +20,14 @@ export interface RankingEntry {
   rankSum: number;
   averageRank: number;
   averagePoint: number;
+}
+
+export interface MvpRankingEntry extends RankingEntry {
+  rawTotalPoint: number;
+  adjustedTotalPoint: number;
+  penaltyPoint: number;
+  games3p: number;
+  games4p: number;
 }
 
 export type AggregatedHandStats = HandStatsSummary;
@@ -501,6 +510,58 @@ export async function rankingByTypes(
   return buildRankingFromResults(results);
 }
 
+export function buildMvpRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriodByTypes>>): MvpRankingEntry[] {
+  const grouped = new Map<
+    string,
+    { userId: string; games: number; rawTotalPoint: number; rankSum: number; games3p: number; games4p: number }
+  >();
+
+  for (const result of results) {
+    const current = grouped.get(result.userId) ?? {
+      userId: result.userId,
+      games: 0,
+      rawTotalPoint: 0,
+      rankSum: 0,
+      games3p: 0,
+      games4p: 0
+    };
+    current.games += 1;
+    current.rawTotalPoint += result.point;
+    current.rankSum += result.rank;
+    if (result.match.type === "3p") {
+      current.games3p += 1;
+    } else if (result.match.type === "4p") {
+      current.games4p += 1;
+    }
+    grouped.set(result.userId, current);
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
+      const penaltyPoint = seasonPenalty(entry.games4p, entry.games3p);
+      return {
+        userId: entry.userId,
+        games: entry.games,
+        totalPoint: entry.rawTotalPoint - penaltyPoint,
+        rawTotalPoint: entry.rawTotalPoint,
+        adjustedTotalPoint: entry.rawTotalPoint - penaltyPoint,
+        penaltyPoint,
+        games3p: entry.games3p,
+        games4p: entry.games4p,
+        rankSum: entry.rankSum,
+        averageRank: entry.rankSum / entry.games,
+        averagePoint: entry.rawTotalPoint / entry.games
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.adjustedTotalPoint - a.adjustedTotalPoint ||
+        b.rawTotalPoint - a.rawTotalPoint ||
+        a.averageRank - b.averageRank ||
+        a.userId.localeCompare(b.userId)
+    );
+}
+
 export function buildRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriod>>): RankingEntry[] {
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
@@ -607,6 +668,50 @@ export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
     current,
     previous,
     latestMatchId: latestMatch.matchId
+  };
+}
+
+export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
+  guildId: string,
+  types: MahjongType[],
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const normalizedTypes = types.map((type) => normalizeMahjongType(type));
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const latestMatch = await prisma.match.findFirst({
+    where: {
+      guildId,
+      type: {
+        in: normalizedTypes
+      },
+      tournamentName: normalizedTournamentName,
+      playedAt: {
+        gte: start,
+        lt: end
+      }
+    },
+    orderBy: [
+      {
+        playedAt: "desc"
+      },
+      {
+        createdAt: "desc"
+      }
+    ],
+    select: {
+      matchId: true
+    }
+  });
+
+  const currentResults = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName);
+  return {
+    currentResults,
+    previousResults: latestMatch
+      ? currentResults.filter((result) => result.match.matchId !== latestMatch.matchId)
+      : [],
+    latestMatchId: latestMatch?.matchId ?? null
   };
 }
 

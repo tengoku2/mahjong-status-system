@@ -6,13 +6,25 @@ export type ShantenFilter = "any" | "iishanten" | "ryanshanten";
 
 export type HonorTileMode = "include" | "exclude";
 
+export type Wind = "east" | "south" | "west" | "north";
+
+export type NanikiruContext = {
+  dora: Tile;
+  turn: number;
+  seatWind: Wind;
+  roundWind: Wind;
+};
+
 export type NanikiruQuestion = {
   hand: Tile[];
   bestShanten: number;
+  bestDiscardCount: number;
 };
 
 const TILE_COUNT = 34;
 const MAX_GENERATION_ATTEMPTS = 5_000;
+const RED_DORA_TILES: Tile[] = [4, 13, 22];
+const winds: Wind[] = ["east", "south", "west", "north"];
 
 const terminalAndHonorTiles = new Set<Tile>([0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33]);
 
@@ -25,6 +37,13 @@ export const shantenFilterLabels: Record<ShantenFilter, string> = {
 export const honorTileModeLabels: Record<HonorTileMode, string> = {
   include: "字牌あり",
   exclude: "字牌なし"
+};
+
+export const windLabels: Record<Wind, string> = {
+  east: "東",
+  south: "南",
+  west: "西",
+  north: "北"
 };
 
 export function parseShantenFilter(value: string | null): ShantenFilter {
@@ -59,6 +78,10 @@ export function formatHand(hand: Tile[]): string {
   return [...suitParts, honors].filter(Boolean).join(" ");
 }
 
+export function formatNanikiruContext(context: NanikiruContext): string {
+  return `ドラ: ${tileLabel(context.dora)} / 赤ドラ: ${formatHand(RED_DORA_TILES)} / 巡目: ${context.turn}巡目 / 自風: ${windLabels[context.seatWind]} / 場風: ${windLabels[context.roundWind]}`;
+}
+
 export function uniqueDiscardTiles(hand: Tile[]): Tile[] {
   return [...new Set(hand)].sort(compareTiles);
 }
@@ -72,11 +95,13 @@ export function generateNanikiruQuestion(filter: ShantenFilter = "any", honorTil
 
   for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
     const hand = drawRandomHand(honorTileMode);
-    const bestShanten = bestShantenAfterDiscard(hand);
-    if (targetShanten === null || bestShanten === targetShanten) {
+    const evaluation = evaluateDiscardShanten(hand);
+    const matchesFilter = targetShanten === null || evaluation.bestShanten === targetShanten;
+    if (matchesFilter && evaluation.bestDiscardTiles.length >= 2) {
       return {
         hand: hand.sort(compareTiles),
-        bestShanten
+        bestShanten: evaluation.bestShanten,
+        bestDiscardCount: evaluation.bestDiscardTiles.length
       };
     }
   }
@@ -86,13 +111,72 @@ export function generateNanikiruQuestion(filter: ShantenFilter = "any", honorTil
 
 export function createNanikiruQuestionFromHand(input: string): NanikiruQuestion {
   const hand = parseHandInput(input);
+  const evaluation = evaluateDiscardShanten(hand);
   return {
     hand: hand.sort(compareTiles),
-    bestShanten: bestShantenAfterDiscard(hand)
+    bestShanten: evaluation.bestShanten,
+    bestDiscardCount: evaluation.bestDiscardTiles.length
   };
 }
 
+export function createNanikiruContext(input: {
+  dora?: string | null;
+  turn?: number | null;
+  seatWind?: string | null;
+  roundWind?: string | null;
+}): NanikiruContext {
+  return {
+    dora: input.dora ? parseTileInput(input.dora) : randomInt(TILE_COUNT),
+    turn: input.turn ?? randomInt(4, 15),
+    seatWind: parseWind(input.seatWind) ?? winds[randomInt(winds.length)],
+    roundWind: parseWind(input.roundWind) ?? (randomInt(10) < 8 ? "east" : "south")
+  };
+}
+
+export function parseTileInput(input: string): Tile {
+  const hand = parseTileList(input);
+  if (hand.length !== 1) {
+    throw new Error("ドラは1枚だけ入力してください。例: 5s, 東");
+  }
+  return hand[0];
+}
+
 export function parseHandInput(input: string): Tile[] {
+  const hand = parseTileList(input);
+
+  if (hand.length !== 14) {
+    throw new Error(`手牌は14枚で入力してください。現在は${hand.length}枚です。`);
+  }
+
+  toCounts(hand);
+  return hand.sort(compareTiles);
+}
+
+export function bestShantenAfterDiscard(hand: Tile[]): number {
+  return evaluateDiscardShanten(hand).bestShanten;
+}
+
+export function evaluateDiscardShanten(hand: Tile[]): { bestShanten: number; bestDiscardTiles: Tile[] } {
+  if (hand.length !== 14) {
+    throw new Error("何切るの手牌は14枚である必要があります。");
+  }
+
+  const results = uniqueDiscardTiles(hand).map((tile) => {
+    const afterDiscard = removeOneTile(hand, tile);
+    return {
+      tile,
+      shanten: calculateShanten(afterDiscard)
+    };
+  });
+  const bestShanten = Math.min(...results.map((result) => result.shanten));
+
+  return {
+    bestShanten,
+    bestDiscardTiles: results.filter((result) => result.shanten === bestShanten).map((result) => result.tile)
+  };
+}
+
+function parseTileList(input: string): Tile[] {
   const normalized = input.replace(/\s+/g, "").replace(/萬/g, "m").replace(/筒/g, "p").replace(/索/g, "s");
   const hand: Tile[] = [];
   let digits = "";
@@ -130,26 +214,7 @@ export function parseHandInput(input: string): Tile[] {
   if (digits) {
     throw new Error("数牌は `123m` のように数字の後に m/p/s を付けて入力してください。");
   }
-
-  if (hand.length !== 14) {
-    throw new Error(`手牌は14枚で入力してください。現在は${hand.length}枚です。`);
-  }
-
-  toCounts(hand);
-  return hand.sort(compareTiles);
-}
-
-export function bestShantenAfterDiscard(hand: Tile[]): number {
-  if (hand.length !== 14) {
-    throw new Error("何切るの手牌は14枚である必要があります。");
-  }
-
-  return Math.min(
-    ...uniqueDiscardTiles(hand).map((tile) => {
-      const afterDiscard = removeOneTile(hand, tile);
-      return calculateShanten(afterDiscard);
-    })
-  );
+  return hand;
 }
 
 export function calculateShanten(hand: Tile[]): number {
@@ -183,6 +248,13 @@ function drawRandomHand(honorTileMode: HonorTileMode): Tile[] {
   }
 
   return hand;
+}
+
+function parseWind(value: string | null | undefined): Wind | null {
+  if (value === "east" || value === "south" || value === "west" || value === "north") {
+    return value;
+  }
+  return null;
 }
 
 function formatSuit(sortedHand: Tile[], offset: number, suffix: "m" | "p" | "s"): string {

@@ -155,8 +155,13 @@ model NanikiruProblem {
   guildId           String           @map("guild_id")
   hand              String
   bestShanten       Int              @map("best_shanten")
+  bestDiscardCount  Int              @default(1) @map("best_discard_count")
   shantenFilter     String           @map("shanten_filter")
   honorTileMode     String           @map("honor_tile_mode")
+  doraTile          Int?             @map("dora_tile")
+  turnNumber        Int?             @map("turn_number")
+  seatWind          String?          @map("seat_wind")
+  roundWind         String?          @map("round_wind")
   questionChannelId String           @map("question_channel_id")
   resultChannelId   String?          @map("result_channel_id")
   messageId         String           @map("message_id")

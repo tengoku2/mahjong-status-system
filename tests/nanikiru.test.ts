@@ -2,11 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   bestShantenAfterDiscard,
   calculateShanten,
+  createNanikiruContext,
   createNanikiruQuestionFromHand,
+  evaluateDiscardShanten,
+  formatNanikiruContext,
   formatHand,
   generateNanikiruQuestion,
   parseHandInput,
   parseHonorTileMode,
+  parseTileInput,
   tileLabel,
   uniqueDiscardTiles
 } from "../src/nanikiru.js";
@@ -39,6 +43,27 @@ describe("nanikiru", () => {
     expect(formatHand(parseHandInput("123m 456p 3566s 東南白中"))).toBe("123m 456p 3566s 東南白中");
   });
 
+  it("parses single tile input for dora", () => {
+    expect(parseTileInput("5s")).toBe(22);
+    expect(parseTileInput("東")).toBe(27);
+    expect(() => parseTileInput("55s")).toThrow("1枚");
+  });
+
+  it("formats nanikiru context", () => {
+    expect(formatNanikiruContext({ dora: 22, turn: 8, seatWind: "south", roundWind: "east" })).toBe(
+      "ドラ: 5s / 赤ドラ: 5m 5p 5s / 巡目: 8巡目 / 自風: 南 / 場風: 東"
+    );
+  });
+
+  it("creates nanikiru context with overrides", () => {
+    expect(createNanikiruContext({ dora: "東", turn: 9, seatWind: "west", roundWind: "south" })).toEqual({
+      dora: 27,
+      turn: 9,
+      seatWind: "west",
+      roundWind: "south"
+    });
+  });
+
   it("rejects invalid manual hand input", () => {
     expect(() => parseHandInput("123m456p356s東南")).toThrow("14枚");
     expect(() => parseHandInput("11111m234p3566s東南")).toThrow("5枚以上");
@@ -55,16 +80,24 @@ describe("nanikiru", () => {
     expect(bestShantenAfterDiscard(hand)).toBe(0);
   });
 
+  it("returns best discard candidates", () => {
+    const evaluation = evaluateDiscardShanten([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 27, 28]);
+    expect(evaluation.bestShanten).toBe(0);
+    expect(evaluation.bestDiscardTiles.length).toBeGreaterThanOrEqual(1);
+  });
+
   it("creates a manual nanikiru question", () => {
     const question = createNanikiruQuestionFromHand("123m456p3566s東南白中");
     expect(formatHand(question.hand)).toBe("123m 456p 3566s 東南白中");
     expect(question.bestShanten).toBeGreaterThanOrEqual(0);
+    expect(question.bestDiscardCount).toBeGreaterThanOrEqual(1);
   });
 
   it("generates filtered hands", () => {
     const question = generateNanikiruQuestion("iishanten");
     expect(question.hand).toHaveLength(14);
     expect(question.bestShanten).toBe(1);
+    expect(question.bestDiscardCount).toBeGreaterThanOrEqual(2);
   });
 
   it("generates hands without honor tiles", () => {

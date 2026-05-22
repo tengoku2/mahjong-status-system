@@ -107,6 +107,32 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
           { name: "字牌なし", value: "exclude" }
         )
     )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option.setName("dora").setDescription("ドラ。未指定ならランダム。例: 5s, 東").setMaxLength(4)
+    )
+    .addIntegerOption((option: SlashCommandIntegerOption) =>
+      option.setName("turn").setDescription("巡目。未指定ならランダム").setMinValue(1).setMaxValue(18)
+    )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option
+        .setName("seat_wind")
+        .setDescription("自風。未指定ならランダム")
+        .addChoices(
+          { name: "東", value: "east" },
+          { name: "南", value: "south" },
+          { name: "西", value: "west" },
+          { name: "北", value: "north" }
+        )
+    )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option
+        .setName("round_wind")
+        .setDescription("場風。未指定ならランダム")
+        .addChoices(
+          { name: "東", value: "east" },
+          { name: "南", value: "south" }
+        )
+    )
     .addChannelOption((option: SlashCommandChannelOption) =>
       option
         .setName("channel")

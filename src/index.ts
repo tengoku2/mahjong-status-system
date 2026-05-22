@@ -23,7 +23,9 @@ import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
 import {
+  createNanikiruContext,
   createNanikiruQuestionFromHand,
+  formatNanikiruContext,
   formatHand,
   generateNanikiruQuestion,
   honorTileModeLabels,
@@ -33,6 +35,7 @@ import {
   tileLabel,
   uniqueDiscardTiles,
   type HonorTileMode,
+  type NanikiruContext,
   type NanikiruQuestion,
   type ShantenFilter,
   type Tile
@@ -651,17 +654,21 @@ async function handleExport(interaction: ChatInputCommandInteraction) {
   });
 }
 
-function nanikiruEmbed(question: NanikiruQuestion, answerCount: number) {
+function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
   return new EmbedBuilder()
     .setTitle("平面何切る")
-    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${answerCount}`)
+    .setDescription(
+      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${answerCount}`
+    )
     .setFooter({ text: "回答すると、自分だけに現在の回答分布が表示されます。24時間後に締め切ります。" });
 }
 
-function closedNanikiruEmbed(question: NanikiruQuestion, answerCount: number) {
+function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
   return new EmbedBuilder()
     .setTitle("平面何切る（締切済み）")
-    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${answerCount}`)
+    .setDescription(
+      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${answerCount}`
+    )
     .setFooter({ text: "この問題の回答受付は終了しました。" });
 }
 
@@ -731,10 +738,25 @@ function deserializeHand(hand: string): Tile[] {
   return hand.split(",").map((tile) => Number(tile));
 }
 
-function storedQuestion(problem: { hand: string; bestShanten: number }): NanikiruQuestion {
+function storedQuestion(problem: { hand: string; bestShanten: number; bestDiscardCount?: number | null }): NanikiruQuestion {
   return {
     hand: deserializeHand(problem.hand),
-    bestShanten: problem.bestShanten
+    bestShanten: problem.bestShanten,
+    bestDiscardCount: problem.bestDiscardCount ?? 1
+  };
+}
+
+function storedContext(problem: {
+  doraTile?: number | null;
+  turnNumber?: number | null;
+  seatWind?: string | null;
+  roundWind?: string | null;
+}): NanikiruContext {
+  return {
+    dora: problem.doraTile ?? 4,
+    turn: problem.turnNumber ?? 8,
+    seatWind: problem.seatWind === "south" || problem.seatWind === "west" || problem.seatWind === "north" ? problem.seatWind : "east",
+    roundWind: problem.roundWind === "south" ? "south" : "east"
   };
 }
 
@@ -743,11 +765,17 @@ async function nanikiruResultEmbed(problem: {
   guildId: string;
   hand: string;
   bestShanten: number;
+  bestDiscardCount?: number | null;
   shantenFilter: string;
   honorTileMode: string;
+  doraTile?: number | null;
+  turnNumber?: number | null;
+  seatWind?: string | null;
+  roundWind?: string | null;
   answers: Array<{ userId: string; tile: number }>;
 }) {
   const question = storedQuestion(problem);
+  const context = storedContext(problem);
   const distribution = await nanikiruDistributionWithNames(problem.guildId, problem.answers);
   const shantenFilterLabel = problem.shantenFilter === "manual"
     ? "手動入力"
@@ -755,7 +783,9 @@ async function nanikiruResultEmbed(problem: {
 
   return new EmbedBuilder()
     .setTitle("平面何切る 回答結果")
-    .setDescription(`手牌: ${formatHand(question.hand)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n回答数: ${problem.answers.length}`)
+    .setDescription(
+      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${problem.answers.length}`
+    )
     .addFields(
       {
         name: "出題条件",
@@ -855,10 +885,11 @@ async function closeNanikiruQuestion(questionId: string) {
   }
 
   const question = storedQuestion(problem);
+  const context = storedContext(problem);
   const messageChannel = await resolveSendableChannel(problem.questionChannelId);
   const message = await messageChannel?.messages.fetch(problem.messageId).catch(() => null);
   await message?.edit({
-    embeds: [closedNanikiruEmbed(question, problem.answers.length)],
+    embeds: [closedNanikiruEmbed(question, context, problem.answers.length)],
     components: []
   }).catch(() => undefined);
 
@@ -875,6 +906,12 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const honorTileMode = parseHonorTileMode(interaction.options.getString("honors"));
   const handInput = interaction.options.getString("hand");
   const question = handInput ? createNanikiruQuestionFromHand(handInput) : generateNanikiruQuestion(filter, honorTileMode);
+  const context = createNanikiruContext({
+    dora: interaction.options.getString("dora"),
+    turn: interaction.options.getInteger("turn"),
+    seatWind: interaction.options.getString("seat_wind"),
+    roundWind: interaction.options.getString("round_wind")
+  });
   const setting = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId } });
   const targetChannel = await resolveNanikiruPostChannel(interaction, setting?.questionChannelId);
 
@@ -886,7 +923,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const questionId = randomUUID();
   const closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const message = await targetChannel.send({
-    embeds: [nanikiruEmbed(question, 0)],
+    embeds: [nanikiruEmbed(question, context, 0)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 
@@ -897,8 +934,13 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       guildId,
       hand: serializeHand(question.hand),
       bestShanten: question.bestShanten,
+      bestDiscardCount: question.bestDiscardCount,
       shantenFilter: handInput ? "manual" : filter,
       honorTileMode,
+      doraTile: context.dora,
+      turnNumber: context.turn,
+      seatWind: context.seatWind,
+      roundWind: context.roundWind,
       questionChannelId: targetChannel.id,
       resultChannelId: setting?.resultChannelId ?? setting?.questionChannelId ?? targetChannel.id,
       messageId: message.id,
@@ -983,6 +1025,7 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
   }
 
   const question = storedQuestion(problem);
+  const context = storedContext(problem);
   const selectedTile = Number(interaction.values[0]);
   if (!Number.isInteger(selectedTile) || !uniqueDiscardTiles(question.hand).includes(selectedTile)) {
     await interaction.reply({ content: "不正な回答です。", flags: MessageFlags.Ephemeral });
@@ -1011,7 +1054,7 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     where: { questionId }
   });
   await interaction.message.edit({
-    embeds: [nanikiruEmbed(question, answers.length)],
+    embeds: [nanikiruEmbed(question, context, answers.length)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 

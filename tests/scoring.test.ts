@@ -10,9 +10,9 @@ describe("scoring", () => {
   });
 
   it("calculates 3p points with uma", () => {
-    expect(calculatePoint("3p", 1, 50000)).toBe(30);
+    expect(calculatePoint("3p", 1, 50000)).toBe(20);
     expect(calculatePoint("3p", 2, 35000)).toBe(0);
-    expect(calculatePoint("3p", 3, 20000)).toBe(-30);
+    expect(calculatePoint("3p", 3, 20000)).toBe(-35);
   });
 
   it("calculates east games as separate types with the same point rules", () => {
@@ -37,9 +37,9 @@ describe("scoring", () => {
         { userId: "3", rank: 3, rawScore: 20000 }
       ])
     ).toEqual([
-      { userId: "1", rank: 1, rawScore: 50000, point: 30 },
+      { userId: "1", rank: 1, rawScore: 50000, point: 20 },
       { userId: "2", rank: 2, rawScore: 35000, point: 0 },
-      { userId: "3", rank: 3, rawScore: 20000, point: -30 }
+      { userId: "3", rank: 3, rawScore: 20000, point: -35 }
     ]);
   });
 

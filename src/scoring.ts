@@ -20,10 +20,10 @@ const rules = {
     ])
   },
   "3p": {
-    returnScore: 35000,
+    returnScore: 40000,
     uma: new Map([
-      [1, 15],
-      [2, 0],
+      [1, 10],
+      [2, 5],
       [3, -15]
     ])
   },

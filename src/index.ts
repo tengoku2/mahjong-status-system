@@ -42,7 +42,7 @@ import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, se
 import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
-import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingForDateRange, rankingWithLatestMatchDeltaForDateRange, records, recordsForDateRange, seasonAwards } from "./services.js";
+import { aggregateStats, createMatch, deleteMatch, ensureGuildAndUsers, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRange, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, seasonAwards } from "./services.js";
 import type { MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -445,20 +445,25 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
 async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
-  const type = typeOption(interaction);
+  const type = optionalTypeOption(interaction);
+  const rankingTypes: MahjongType[] = type ? [type] : ["3p", "4p"];
+  const rankingLabel = type ? typeLabel(type) : "MVP";
+  const rankingScope = type ? `\u7a2e\u5225: ${typeLabel(type)}` : "\u5bfe\u8c61: 3\u4eba\u534a\u8358 + 4\u4eba\u534a\u8358";
   const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
   const showMovement = Boolean(season && isCurrentSeasonWindow(season));
   const rankingData = season
     ? showMovement
-      ? await rankingWithLatestMatchDeltaForDateRange(guildId, type, season.start, season.end, tournamentName)
+      ? await rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
       : {
-          current: await rankingForDateRange(guildId, type, season.start, season.end, tournamentName),
+          current: await rankingForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName),
           previous: [],
           latestMatchId: null
         }
     : {
-        current: await ranking(guildId, type, period!, tournamentName),
+        current: type
+          ? await ranking(guildId, type, period!, tournamentName)
+          : await rankingByTypes(guildId, rankingTypes, period!, tournamentName),
         previous: [],
         latestMatchId: null
       };
@@ -468,22 +473,19 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
       const member = await fetchMember(interaction, entry.userId);
       const name = await displayName(guildId, member, entry.userId);
       const movement = showMovement ? `${movementSymbol(movements.get(entry.userId) ?? "same")} ` : "";
-      return `${index + 1}. ${movement}${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}戦 / 平均${formatPoint(
-        entry.averagePoint
-      )}pt / 平均順位${entry.averageRank.toFixed(2)})`;
+      return `${index + 1}. ${movement}${name} ${formatPoint(entry.totalPoint)}pt (${entry.games}\u6226 / \u5e73\u5747${formatPoint(entry.averagePoint)}pt / \u5e73\u5747\u9806\u4f4d${entry.averageRank.toFixed(2)})`;
     })
   );
 
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${typeLabel(type)} ポイントランキング ${season ? formatSeasonLabel(season) : formatPeriodLabel(period!)}`)
+        .setTitle(`${rankingLabel} \u30dd\u30a4\u30f3\u30c8\u30e9\u30f3\u30ad\u30f3\u30b0 ${season ? formatSeasonLabel(season) : formatPeriodLabel(period!)}`)
         .setDescription(
-          `種別: ${typeLabel(type)} / ${season ? `シーズン: ${formatSeasonLabel(season)}` : `期間: ${formatPeriodLabel(period!)}`}${
-            tournamentName ? ` / 大会名: ${tournamentName}` : ""
-          }\n${
-            lines.join("\n") || "集計対象がありません。"
-          }`
+          `${rankingScope} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
+            tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
+          }
+\n${lines.join("\n") || "\u5bfe\u8c61\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093"}`
         )
     ]
   });

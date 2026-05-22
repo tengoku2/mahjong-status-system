@@ -237,15 +237,14 @@ function buildHandCreateInputs(hands: HandInput[]) {
   }));
 }
 
-async function periodMatchIds(
+async function periodMatchIdsForTypes(
   guildId: string,
-  type: MahjongType,
+  types: MahjongType[],
   period: Period,
   userId?: string,
   tournamentName?: string
 ): Promise<string[] | null> {
   const limit = recentLimit(period);
-  const normalizedType = normalizeMahjongType(type);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
   if (!limit) {
     return null;
@@ -254,7 +253,9 @@ async function periodMatchIds(
   const matches = await prisma.match.findMany({
     where: {
       guildId,
-      type: normalizedType,
+      type: {
+        in: types.map((type) => normalizeMahjongType(type))
+      },
       tournamentName: normalizedTournamentName,
       results: userId
         ? {
@@ -328,12 +329,22 @@ export async function getResultsForPeriod(
   userId?: string,
   tournamentName?: string
 ) {
-  const normalizedType = normalizeMahjongType(type);
-  const matchIds = await periodMatchIds(guildId, type, period, userId, tournamentName);
+  return getResultsForPeriodByTypes(guildId, [type], period, userId, tournamentName);
+}
+
+export async function getResultsForPeriodByTypes(
+  guildId: string,
+  types: MahjongType[],
+  period: Period,
+  userId?: string,
+  tournamentName?: string
+) {
+  const normalizedTypes = types.map((type) => normalizeMahjongType(type));
+  const matchIds = await periodMatchIdsForTypes(guildId, normalizedTypes, period, userId, tournamentName);
   const dateRange = periodDateRange(period);
   return getResultsByOptions({
     guildId,
-    types: [normalizedType],
+    types: normalizedTypes,
     userId,
     tournamentName,
     playedAtStart: dateRange?.start,
@@ -394,7 +405,7 @@ export async function aggregateHandStats(
   tournamentName?: string
 ): Promise<AggregatedHandStats> {
   const normalizedType = normalizeMahjongType(type);
-  const matchIds = await periodMatchIds(guildId, type, period, userId, tournamentName);
+  const matchIds = await periodMatchIdsForTypes(guildId, [type], period, userId, tournamentName);
   const dateRange = periodDateRange(period);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
@@ -480,6 +491,16 @@ export async function ranking(guildId: string, type: MahjongType, period: Period
   return buildRankingFromResults(results);
 }
 
+export async function rankingByTypes(
+  guildId: string,
+  types: MahjongType[],
+  period: Period,
+  tournamentName?: string
+) {
+  const results = await getResultsForPeriodByTypes(guildId, types, period, undefined, tournamentName);
+  return buildRankingFromResults(results);
+}
+
 export function buildRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriod>>): RankingEntry[] {
   const grouped = new Map<string, { userId: string; games: number; totalPoint: number; rankSum: number }>();
 
@@ -516,6 +537,17 @@ export async function rankingForDateRange(
   return buildRankingFromResults(results);
 }
 
+export async function rankingForDateRangeByTypes(
+  guildId: string,
+  types: MahjongType[],
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const results = await getResultsForDateRange(guildId, types, start, end, undefined, tournamentName);
+  return buildRankingFromResults(results);
+}
+
 export async function rankingWithLatestMatchDeltaForDateRange(
   guildId: string,
   type: MahjongType,
@@ -523,12 +555,24 @@ export async function rankingWithLatestMatchDeltaForDateRange(
   end: Date,
   tournamentName?: string
 ) {
-  const normalizedType = normalizeMahjongType(type);
+  return rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, [type], start, end, tournamentName);
+}
+
+export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
+  guildId: string,
+  types: MahjongType[],
+  start: Date,
+  end: Date,
+  tournamentName?: string
+) {
+  const normalizedTypes = types.map((type) => normalizeMahjongType(type));
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
   const latestMatch = await prisma.match.findFirst({
     where: {
       guildId,
-      type: normalizedType,
+      type: {
+        in: normalizedTypes
+      },
       tournamentName: normalizedTournamentName,
       playedAt: {
         gte: start,
@@ -548,7 +592,7 @@ export async function rankingWithLatestMatchDeltaForDateRange(
     }
   });
 
-  const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName);
+  const results = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName);
   const current = buildRankingFromResults(results);
   if (!latestMatch) {
     return {

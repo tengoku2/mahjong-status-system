@@ -46,7 +46,7 @@ import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { formatPenaltySuffix, isManager, lockStateForPeriod, lockStateForSeason, latestConcludedSeason } from "./season-lock.js";
-import { aggregateStats, buildMvpRankingFromResults, createMatch, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type MvpRankingEntry, type RankingEntry } from "./services.js";
+import { aggregateHandStats, aggregateStats, buildMvpRankingFromResults, createMatch, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type AggregatedHandStats, type MvpRankingEntry, type RankingEntry } from "./services.js";
 import type { MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -183,6 +183,48 @@ function formatDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function formatNullableRate(value: number | null): string {
+  return value === null ? "-" : formatPercent(value * 100);
+}
+
+function formatNullableAverage(value: number | null, digits = 1): string {
+  return value === null ? "-" : value.toFixed(digits);
+}
+
+function handStatsFields(stats: AggregatedHandStats) {
+  if (stats.totalHands === 0) {
+    return [];
+  }
+
+  return [
+    {
+      name: "局スタッツ",
+      value: [
+        `対象局数: ${stats.totalHands}`,
+        `和了率: ${formatNullableRate(stats.winRate)}`,
+        `放銃率: ${formatNullableRate(stats.dealInRate)}`,
+        `立直率: ${formatNullableRate(stats.riichiRate)}`,
+        `副露率: ${formatNullableRate(stats.callRate)}`,
+        `流局率: ${formatNullableRate(stats.drawRate)}`
+      ].join("\n"),
+      inline: true
+    },
+    {
+      name: "局詳細",
+      value: [
+        `自摸率: ${formatNullableRate(stats.tsumoRate)}`,
+        `ダマ率: ${formatNullableRate(stats.damaRate)}`,
+        `流局聴牌率: ${formatNullableRate(stats.ryukyokuTenpaiRate)}`,
+        `平均和了: ${formatNullableAverage(stats.averageWinScore, 0)}点`,
+        `平均放銃: ${formatNullableAverage(stats.averageDealInScore, 0)}点`,
+        `平均和了順目: ${formatNullableAverage(stats.averageWinOrder, 1)}`,
+        `飛び率: ${formatNullableRate(stats.bustRate)}`
+      ].join("\n"),
+      inline: true
+    }
+  ];
 }
 
 function typeLabel(type: MahjongType): string {
@@ -403,7 +445,10 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
     return;
   }
   const tournamentName = tournamentOption(interaction);
-  const stats = await aggregateStats(guildId, type, period, user.id, tournamentName);
+  const [stats, handStats] = await Promise.all([
+    aggregateStats(guildId, type, period, user.id, tournamentName),
+    aggregateHandStats(guildId, type, period, user.id, tournamentName)
+  ]);
   const name = await displayName(guildId, await fetchMember(interaction, user.id), user.id);
   const rankFields = [...stats.rankCounts.entries()].map(([rank, count]) => ({
     name: `${rank}位`,
@@ -433,6 +478,7 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
           { name: "平均順位", value: stats.totalGames ? stats.averageRank.toFixed(2) : "-", inline: true },
           { name: "平均ポイント", value: stats.totalGames ? `${formatPoint(stats.averagePoint)}pt` : "-", inline: true },
           ...rankFields,
+          ...handStatsFields(handStats),
           { name: "直近対局履歴", value: history || "対局履歴がありません。", inline: false }
         )
     ]

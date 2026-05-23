@@ -126,7 +126,7 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
       option.setName("dora").setDescription("ドラ。カン後ドラはカンマ区切りで4枚まで。例: 4p,5s,東").setMaxLength(40)
     )
     .addIntegerOption((option: SlashCommandIntegerOption) =>
-      option.setName("turn").setDescription("巡目。未指定ならランダム").setMinValue(1).setMaxValue(12)
+      option.setName("turn").setDescription("巡目。未指定ならランダム").setMinValue(1)
     )
     .addStringOption((option: SlashCommandStringOption) =>
       option

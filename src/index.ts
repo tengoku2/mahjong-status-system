@@ -436,11 +436,15 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
 }
 
 async function handleStats(interaction: ChatInputCommandInteraction) {
-  await interaction.deferReply();
   const guildId = requireGuildId(interaction);
   const user = interaction.options.getUser("user") ?? interaction.user;
   const type = typeOption(interaction);
   const period = periodOption(interaction);
+  const setting = await getSeasonLockSetting(guildId);
+  const isLockedSelfView = lockStateForPeriod(period, setting).locked && user.id === interaction.user.id;
+
+  await interaction.deferReply(isLockedSelfView ? { flags: MessageFlags.Ephemeral } : undefined);
+
   if (!(await ensureSeasonLockAccess(interaction, "self_stats_only", { period, selfUserId: user.id }))) {
     return;
   }

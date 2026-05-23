@@ -126,7 +126,7 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
       option.setName("dora").setDescription("ドラ。未指定ならランダム。例: 5s, 東").setMaxLength(4)
     )
     .addIntegerOption((option: SlashCommandIntegerOption) =>
-      option.setName("turn").setDescription("巡目。未指定ならランダム").setMinValue(1).setMaxValue(18)
+      option.setName("turn").setDescription("巡目。未指定ならランダム").setMinValue(1).setMaxValue(12)
     )
     .addStringOption((option: SlashCommandStringOption) =>
       option
@@ -145,8 +145,12 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
         .setDescription("場風。未指定ならランダム")
         .addChoices(
           { name: "東", value: "east" },
-          { name: "南", value: "south" }
+          { name: "南", value: "south" },
+          { name: "西", value: "west" }
         )
+    )
+    .addIntegerOption((option: SlashCommandIntegerOption) =>
+      option.setName("round_number").setDescription("局数。西入は1のみ。未指定ならランダム").setMinValue(1).setMaxValue(4)
     )
     .addChannelOption((option: SlashCommandChannelOption) =>
       option

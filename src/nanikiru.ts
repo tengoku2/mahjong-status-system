@@ -13,6 +13,7 @@ export type NanikiruContext = {
   turn: number;
   seatWind: Wind;
   roundWind: Wind;
+  roundNumber: number;
 };
 
 export type NanikiruQuestion = {
@@ -89,7 +90,7 @@ export function formatNanikiruHand(question: Pick<NanikiruQuestion, "hand" | "re
 }
 
 export function formatNanikiruContext(context: NanikiruContext): string {
-  return `ドラ${tileLabel(context.dora)} ${windLabels[context.roundWind]}1局 ${windLabels[context.seatWind]}家 ${context.turn}巡目`;
+  return `ドラ${tileLabel(context.dora)} ${windLabels[context.roundWind]}${context.roundNumber}局 ${windLabels[context.seatWind]}家 ${context.turn}巡目`;
 }
 
 export function uniqueDiscardTiles(hand: Tile[]): Tile[] {
@@ -136,12 +137,17 @@ export function createNanikiruContext(input: {
   turn?: number | null;
   seatWind?: string | null;
   roundWind?: string | null;
+  roundNumber?: number | null;
 }): NanikiruContext {
+  const randomRound = createRandomRound();
+  const roundWind = parseRoundWind(input.roundWind) ?? randomRound.roundWind;
+  const roundNumber = roundWind === "west" ? 1 : input.roundNumber ?? (input.roundWind ? 1 : randomRound.roundNumber);
   return {
     dora: input.dora ? parseTileInput(input.dora) : randomInt(TILE_COUNT),
-    turn: input.turn ?? randomInt(4, 15),
+    turn: input.turn ?? randomTurn(),
     seatWind: parseWind(input.seatWind) ?? winds[randomInt(winds.length)],
-    roundWind: parseWind(input.roundWind) ?? (randomInt(10) < 8 ? "east" : "south")
+    roundWind,
+    roundNumber
   };
 }
 
@@ -288,8 +294,34 @@ function drawRandomHand(honorTileMode: HonorTileMode): { hand: Tile[]; redDoraTi
   return { hand, redDoraTiles: redDoraTiles.sort(compareTiles) };
 }
 
+function randomTurn(): number {
+  if (randomInt(100) < 70) {
+    return randomInt(2, 9);
+  }
+  return randomInt(9, 13);
+}
+
+function createRandomRound(): { roundWind: Wind; roundNumber: number } {
+  if (randomInt(100) < 3) {
+    return { roundWind: "west", roundNumber: 1 };
+  }
+
+  const index = randomInt(8);
+  return {
+    roundWind: index < 4 ? "east" : "south",
+    roundNumber: (index % 4) + 1
+  };
+}
+
 function parseWind(value: string | null | undefined): Wind | null {
   if (value === "east" || value === "south" || value === "west" || value === "north") {
+    return value;
+  }
+  return null;
+}
+
+function parseRoundWind(value: string | null | undefined): Wind | null {
+  if (value === "east" || value === "south" || value === "west") {
     return value;
   }
   return null;

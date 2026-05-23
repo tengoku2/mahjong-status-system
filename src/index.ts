@@ -888,12 +888,14 @@ function storedContext(problem: {
   turnNumber?: number | null;
   seatWind?: string | null;
   roundWind?: string | null;
+  roundNumber?: number | null;
 }): NanikiruContext {
   return {
     dora: problem.doraTile ?? 4,
     turn: problem.turnNumber ?? 8,
     seatWind: problem.seatWind === "south" || problem.seatWind === "west" || problem.seatWind === "north" ? problem.seatWind : "east",
-    roundWind: problem.roundWind === "south" ? "south" : "east"
+    roundWind: problem.roundWind === "south" || problem.roundWind === "west" ? problem.roundWind : "east",
+    roundNumber: problem.roundWind === "west" ? 1 : problem.roundNumber ?? 1
   };
 }
 
@@ -910,6 +912,7 @@ async function nanikiruResultEmbed(problem: {
   turnNumber?: number | null;
   seatWind?: string | null;
   roundWind?: string | null;
+  roundNumber?: number | null;
   answers: Array<{ userId: string; tile: number }>;
 }) {
   const question = storedQuestion(problem);
@@ -1046,7 +1049,8 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
     dora: interaction.options.getString("dora"),
     turn: interaction.options.getInteger("turn"),
     seatWind: interaction.options.getString("seat_wind"),
-    roundWind: interaction.options.getString("round_wind")
+    roundWind: interaction.options.getString("round_wind"),
+    roundNumber: interaction.options.getInteger("round_number")
   });
   const setting = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId } });
   const targetChannel = await resolveNanikiruPostChannel(interaction, setting?.questionChannelId);
@@ -1078,6 +1082,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       turnNumber: context.turn,
       seatWind: context.seatWind,
       roundWind: context.roundWind,
+      roundNumber: context.roundNumber,
       questionChannelId: targetChannel.id,
       resultChannelId: setting?.resultChannelId ?? setting?.questionChannelId ?? targetChannel.id,
       messageId: message.id,

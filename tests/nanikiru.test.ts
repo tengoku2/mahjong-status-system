@@ -59,19 +59,44 @@ describe("nanikiru", () => {
   });
 
   it("formats nanikiru context", () => {
-    expect(formatNanikiruContext({ dora: 22, turn: 8, seatWind: "south", roundWind: "east" })).toBe(
+    expect(formatNanikiruContext({ dora: 22, turn: 8, seatWind: "south", roundWind: "east", roundNumber: 1 })).toBe(
       "ドラ5s 東1局 南家 8巡目"
     );
-    expect(formatNanikiruContext({ dora: 12, turn: 2, seatWind: "west", roundWind: "east" })).toBe("ドラ4p 東1局 西家 2巡目");
+    expect(formatNanikiruContext({ dora: 12, turn: 2, seatWind: "west", roundWind: "south", roundNumber: 4 })).toBe(
+      "ドラ4p 南4局 西家 2巡目"
+    );
   });
 
   it("creates nanikiru context with overrides", () => {
-    expect(createNanikiruContext({ dora: "東", turn: 9, seatWind: "west", roundWind: "south" })).toEqual({
+    expect(createNanikiruContext({ dora: "東", turn: 9, seatWind: "west", roundWind: "south", roundNumber: 4 })).toEqual({
       dora: 27,
       turn: 9,
       seatWind: "west",
-      roundWind: "south"
+      roundWind: "south",
+      roundNumber: 4
     });
+    expect(createNanikiruContext({ dora: "4p", turn: 2, seatWind: "east", roundWind: "west", roundNumber: 4 })).toEqual({
+      dora: 12,
+      turn: 2,
+      seatWind: "east",
+      roundWind: "west",
+      roundNumber: 1
+    });
+  });
+
+  it("creates random nanikiru context within supported turn and round ranges", () => {
+    for (let i = 0; i < 200; i += 1) {
+      const context = createNanikiruContext({});
+      expect(context.turn).toBeGreaterThanOrEqual(2);
+      expect(context.turn).toBeLessThanOrEqual(12);
+      if (context.roundWind === "west") {
+        expect(context.roundNumber).toBe(1);
+      } else {
+        expect(["east", "south"]).toContain(context.roundWind);
+        expect(context.roundNumber).toBeGreaterThanOrEqual(1);
+        expect(context.roundNumber).toBeLessThanOrEqual(4);
+      }
+    }
   });
 
   it("rejects invalid manual hand input", () => {

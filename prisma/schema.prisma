@@ -175,6 +175,7 @@ model NanikiruProblem {
   turnNumber        Int?             @map("turn_number")
   seatWind          String?          @map("seat_wind")
   roundWind         String?          @map("round_wind")
+  roundNumber       Int?             @map("round_number")
   questionChannelId String           @map("question_channel_id")
   resultChannelId   String?          @map("result_channel_id")
   messageId         String           @map("message_id")

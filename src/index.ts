@@ -845,17 +845,25 @@ async function handleSeasonUnlock(interaction: ChatInputCommandInteraction) {
   await interaction.editReply(`${formatSeasonLabel(season)} のロックを解除しました。`);
 }
 
-function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
+function nanikiruDescription(question: NanikiruQuestion, context: NanikiruContext, note?: string | null): string {
+  const lines = [formatNanikiruContext(context), formatNanikiruHand(question)];
+  if (note) {
+    lines.push(`備考: ${note}`);
+  }
+  return lines.join("\n");
+}
+
+function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number, note?: string | null) {
   return new EmbedBuilder()
     .setTitle("平面何切る")
-    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}`)
+    .setDescription(nanikiruDescription(question, context, note))
     .setFooter({ text: `回答数: ${answerCount} / 回答すると自分だけに現在の回答分布が表示されます。24時間後に締め切ります。` });
 }
 
-function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
+function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number, note?: string | null) {
   return new EmbedBuilder()
     .setTitle("平面何切る（締切済み）")
-    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}`)
+    .setDescription(nanikiruDescription(question, context, note))
     .setFooter({ text: `回答数: ${answerCount} / この問題の回答受付は終了しました。` });
 }
 
@@ -970,6 +978,7 @@ async function nanikiruResultEmbed(problem: {
   seatWind?: string | null;
   roundWind?: string | null;
   roundNumber?: number | null;
+  note?: string | null;
   answers: Array<{ userId: string; tile: number }>;
 }) {
   const question = storedQuestion(problem);
@@ -981,7 +990,7 @@ async function nanikiruResultEmbed(problem: {
 
   return new EmbedBuilder()
     .setTitle("平面何切る 回答結果")
-    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}\n回答数: ${problem.answers.length}`)
+    .setDescription(`${nanikiruDescription(question, context, problem.note)}\n回答数: ${problem.answers.length}`)
     .addFields(
       {
         name: "出題条件",
@@ -1085,7 +1094,7 @@ async function closeNanikiruQuestion(questionId: string) {
   const messageChannel = await resolveSendableChannel(problem.questionChannelId);
   const message = await messageChannel?.messages.fetch(problem.messageId).catch(() => null);
   await message?.edit({
-    embeds: [closedNanikiruEmbed(question, context, problem.answers.length)],
+    embeds: [closedNanikiruEmbed(question, context, problem.answers.length, problem.note)],
     components: []
   }).catch(() => undefined);
 
@@ -1101,6 +1110,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const filter = parseShantenFilter(interaction.options.getString("shanten"));
   const honorTileMode = parseHonorTileMode(interaction.options.getString("honors"));
   const handInput = interaction.options.getString("hand");
+  const note = interaction.options.getString("note")?.trim() || null;
   const question = handInput ? createNanikiruQuestionFromHand(handInput) : generateNanikiruQuestion(filter, honorTileMode);
   const context = createNanikiruContext({
     dora: interaction.options.getString("dora"),
@@ -1120,7 +1130,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const questionId = randomUUID();
   const closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const message = await targetChannel.send({
-    embeds: [nanikiruEmbed(question, context, 0)],
+    embeds: [nanikiruEmbed(question, context, 0, note)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 
@@ -1137,6 +1147,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       honorTileMode,
       doraTile: context.doraTiles[0],
       doraTiles: serializeDoraTiles(context.doraTiles),
+      note,
       turnNumber: context.turn,
       seatWind: context.seatWind,
       roundWind: context.roundWind,
@@ -1254,7 +1265,7 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     where: { questionId }
   });
   await interaction.message.edit({
-    embeds: [nanikiruEmbed(question, context, answers.length)],
+    embeds: [nanikiruEmbed(question, context, answers.length, problem.note)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 

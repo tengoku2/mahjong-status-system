@@ -152,6 +152,9 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
     .addIntegerOption((option: SlashCommandIntegerOption) =>
       option.setName("round_number").setDescription("局数。西入は1のみ。未指定ならランダム").setMinValue(1).setMaxValue(4)
     )
+    .addStringOption((option: SlashCommandStringOption) =>
+      option.setName("note").setDescription("備考。例: 3sカン済み、上家が中ポン").setMaxLength(200)
+    )
     .addChannelOption((option: SlashCommandChannelOption) =>
       option
         .setName("channel")

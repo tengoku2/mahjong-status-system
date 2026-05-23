@@ -920,6 +920,14 @@ function deserializeRedDoraTiles(redDoraTiles?: string | null): Tile[] {
   return redDoraTiles ? redDoraTiles.split(",").map((tile) => Number(tile)) : [];
 }
 
+function serializeDoraTiles(doraTiles: Tile[]): string {
+  return doraTiles.join(",");
+}
+
+function deserializeDoraTiles(doraTiles?: string | null): Tile[] {
+  return doraTiles ? doraTiles.split(",").map((tile) => Number(tile)) : [];
+}
+
 function storedQuestion(problem: { hand: string; redDoraTiles?: string | null; bestShanten: number; bestDiscardCount?: number | null }): NanikiruQuestion {
   return {
     hand: deserializeHand(problem.hand),
@@ -931,13 +939,15 @@ function storedQuestion(problem: { hand: string; redDoraTiles?: string | null; b
 
 function storedContext(problem: {
   doraTile?: number | null;
+  doraTiles?: string | null;
   turnNumber?: number | null;
   seatWind?: string | null;
   roundWind?: string | null;
   roundNumber?: number | null;
 }): NanikiruContext {
+  const doraTiles = deserializeDoraTiles(problem.doraTiles);
   return {
-    dora: problem.doraTile ?? 4,
+    doraTiles: doraTiles.length > 0 ? doraTiles : [problem.doraTile ?? 4],
     turn: problem.turnNumber ?? 8,
     seatWind: problem.seatWind === "south" || problem.seatWind === "west" || problem.seatWind === "north" ? problem.seatWind : "east",
     roundWind: problem.roundWind === "south" || problem.roundWind === "west" ? problem.roundWind : "east",
@@ -955,6 +965,7 @@ async function nanikiruResultEmbed(problem: {
   shantenFilter: string;
   honorTileMode: string;
   doraTile?: number | null;
+  doraTiles?: string | null;
   turnNumber?: number | null;
   seatWind?: string | null;
   roundWind?: string | null;
@@ -1124,7 +1135,8 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       bestDiscardCount: question.bestDiscardCount,
       shantenFilter: handInput ? "manual" : filter,
       honorTileMode,
-      doraTile: context.dora,
+      doraTile: context.doraTiles[0],
+      doraTiles: serializeDoraTiles(context.doraTiles),
       turnNumber: context.turn,
       seatWind: context.seatWind,
       roundWind: context.roundWind,

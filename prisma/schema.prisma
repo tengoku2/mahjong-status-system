@@ -172,6 +172,7 @@ model NanikiruProblem {
   shantenFilter     String           @map("shanten_filter")
   honorTileMode     String           @map("honor_tile_mode")
   doraTile          Int?             @map("dora_tile")
+  doraTiles         String?          @map("dora_tiles")
   turnNumber        Int?             @map("turn_number")
   seatWind          String?          @map("seat_wind")
   roundWind         String?          @map("round_wind")

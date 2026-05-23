@@ -9,6 +9,7 @@ import {
   formatHand,
   formatNanikiruHand,
   generateNanikiruQuestion,
+  parseDoraInput,
   parseHandInput,
   parseHandInputWithRed,
   parseHonorTileMode,
@@ -56,27 +57,30 @@ describe("nanikiru", () => {
     expect(parseTileInput("5s")).toBe(22);
     expect(parseTileInput("東")).toBe(27);
     expect(() => parseTileInput("55s")).toThrow("1枚");
+    expect(parseDoraInput("4p,5s,東")).toEqual([12, 22, 27]);
+    expect(parseDoraInput("4p、5s")).toEqual([12, 22]);
+    expect(() => parseDoraInput("1m,2m,3m,4m,5m")).toThrow("4枚まで");
   });
 
   it("formats nanikiru context", () => {
-    expect(formatNanikiruContext({ dora: 22, turn: 8, seatWind: "south", roundWind: "east", roundNumber: 1 })).toBe(
+    expect(formatNanikiruContext({ doraTiles: [22], turn: 8, seatWind: "south", roundWind: "east", roundNumber: 1 })).toBe(
       "ドラ5s 東1局 南家 8巡目"
     );
-    expect(formatNanikiruContext({ dora: 12, turn: 2, seatWind: "west", roundWind: "south", roundNumber: 4 })).toBe(
-      "ドラ4p 南4局 西家 2巡目"
+    expect(formatNanikiruContext({ doraTiles: [12, 22, 27], turn: 2, seatWind: "west", roundWind: "south", roundNumber: 4 })).toBe(
+      "ドラ4p,5s,東 南4局 西家 2巡目"
     );
   });
 
   it("creates nanikiru context with overrides", () => {
-    expect(createNanikiruContext({ dora: "東", turn: 9, seatWind: "west", roundWind: "south", roundNumber: 4 })).toEqual({
-      dora: 27,
+    expect(createNanikiruContext({ dora: "東,5s", turn: 9, seatWind: "west", roundWind: "south", roundNumber: 4 })).toEqual({
+      doraTiles: [27, 22],
       turn: 9,
       seatWind: "west",
       roundWind: "south",
       roundNumber: 4
     });
     expect(createNanikiruContext({ dora: "4p", turn: 2, seatWind: "east", roundWind: "west", roundNumber: 4 })).toEqual({
-      dora: 12,
+      doraTiles: [12],
       turn: 2,
       seatWind: "east",
       roundWind: "west",

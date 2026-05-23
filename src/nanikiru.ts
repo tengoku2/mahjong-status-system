@@ -9,7 +9,7 @@ export type HonorTileMode = "include" | "exclude";
 export type Wind = "east" | "south" | "west" | "north";
 
 export type NanikiruContext = {
-  dora: Tile;
+  doraTiles: Tile[];
   turn: number;
   seatWind: Wind;
   roundWind: Wind;
@@ -90,7 +90,8 @@ export function formatNanikiruHand(question: Pick<NanikiruQuestion, "hand" | "re
 }
 
 export function formatNanikiruContext(context: NanikiruContext): string {
-  return `ドラ${tileLabel(context.dora)} ${windLabels[context.roundWind]}${context.roundNumber}局 ${windLabels[context.seatWind]}家 ${context.turn}巡目`;
+  const doraText = context.doraTiles.map(tileLabel).join(",");
+  return `ドラ${doraText} ${windLabels[context.roundWind]}${context.roundNumber}局 ${windLabels[context.seatWind]}家 ${context.turn}巡目`;
 }
 
 export function uniqueDiscardTiles(hand: Tile[]): Tile[] {
@@ -143,7 +144,7 @@ export function createNanikiruContext(input: {
   const roundWind = parseRoundWind(input.roundWind) ?? randomRound.roundWind;
   const roundNumber = roundWind === "west" ? 1 : input.roundNumber ?? (input.roundWind ? 1 : randomRound.roundNumber);
   return {
-    dora: input.dora ? parseTileInput(input.dora) : randomInt(TILE_COUNT),
+    doraTiles: input.dora ? parseDoraInput(input.dora) : [randomInt(TILE_COUNT)],
     turn: input.turn ?? randomTurn(),
     seatWind: parseWind(input.seatWind) ?? winds[randomInt(winds.length)],
     roundWind,
@@ -157,6 +158,20 @@ export function parseTileInput(input: string): Tile {
     throw new Error("ドラは1枚だけ入力してください。例: 5s, 東");
   }
   return hand[0];
+}
+
+export function parseDoraInput(input: string): Tile[] {
+  const parts = input
+    .split(/[,、]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("ドラを入力してください。例: 4p,5s,東");
+  }
+  if (parts.length > 4) {
+    throw new Error("ドラは4枚まで入力してください。例: 4p,5s,東");
+  }
+  return parts.map(parseTileInput);
 }
 
 export function parseHandInput(input: string): Tile[] {

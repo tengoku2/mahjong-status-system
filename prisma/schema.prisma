@@ -166,6 +166,7 @@ model NanikiruProblem {
   questionId        String           @id @map("question_id")
   guildId           String           @map("guild_id")
   hand              String
+  redDoraTiles      String           @default("") @map("red_dora_tiles")
   bestShanten       Int              @map("best_shanten")
   bestDiscardCount  Int              @default(1) @map("best_discard_count")
   shantenFilter     String           @map("shanten_filter")

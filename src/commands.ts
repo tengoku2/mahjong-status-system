@@ -100,7 +100,7 @@ function addNanikiruOptions(command: SlashCommandSubcommandBuilder) {
     .addStringOption((option: SlashCommandStringOption) =>
       option
         .setName("hand")
-        .setDescription("手動出題する14枚手牌。例: 123m456p3566s東南")
+        .setDescription("手動出題する14枚手牌。赤5は0m/0p/0s。例: 123m456p3506s東南白")
         .setMaxLength(80)
     )
     .addStringOption((option: SlashCommandStringOption) =>

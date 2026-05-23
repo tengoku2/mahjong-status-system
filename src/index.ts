@@ -26,7 +26,7 @@ import {
   createNanikiruContext,
   createNanikiruQuestionFromHand,
   formatNanikiruContext,
-  formatHand,
+  formatNanikiruHand,
   generateNanikiruQuestion,
   honorTileModeLabels,
   parseHonorTileMode,
@@ -802,32 +802,15 @@ async function handleSeasonUnlock(interaction: ChatInputCommandInteraction) {
 function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
   return new EmbedBuilder()
     .setTitle("平面何切る")
-    .setDescription(
-      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${answerCount}`
-    )
-    .setFooter({ text: "回答すると、自分だけに現在の回答分布が表示されます。24時間後に締め切ります。" });
+    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}`)
+    .setFooter({ text: `回答数: ${answerCount} / 回答すると自分だけに現在の回答分布が表示されます。24時間後に締め切ります。` });
 }
 
 function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number) {
   return new EmbedBuilder()
     .setTitle("平面何切る（締切済み）")
-    .setDescription(
-      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${answerCount}`
-    )
-    .setFooter({ text: "この問題の回答受付は終了しました。" });
-}
-
-function shantenLabel(shanten: number): string {
-  if (shanten === 0) {
-    return "聴牌";
-  }
-  if (shanten === 1) {
-    return "一向聴";
-  }
-  if (shanten === 2) {
-    return "二向聴";
-  }
-  return `${shanten}向聴`;
+    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}`)
+    .setFooter({ text: `回答数: ${answerCount} / この問題の回答受付は終了しました。` });
 }
 
 function nanikiruAnswerRow(questionId: string, hand: Tile[]) {
@@ -883,9 +866,18 @@ function deserializeHand(hand: string): Tile[] {
   return hand.split(",").map((tile) => Number(tile));
 }
 
-function storedQuestion(problem: { hand: string; bestShanten: number; bestDiscardCount?: number | null }): NanikiruQuestion {
+function serializeRedDoraTiles(redDoraTiles: Tile[]): string {
+  return redDoraTiles.join(",");
+}
+
+function deserializeRedDoraTiles(redDoraTiles?: string | null): Tile[] {
+  return redDoraTiles ? redDoraTiles.split(",").map((tile) => Number(tile)) : [];
+}
+
+function storedQuestion(problem: { hand: string; redDoraTiles?: string | null; bestShanten: number; bestDiscardCount?: number | null }): NanikiruQuestion {
   return {
     hand: deserializeHand(problem.hand),
+    redDoraTiles: deserializeRedDoraTiles(problem.redDoraTiles),
     bestShanten: problem.bestShanten,
     bestDiscardCount: problem.bestDiscardCount ?? 1
   };
@@ -909,6 +901,7 @@ async function nanikiruResultEmbed(problem: {
   questionId: string;
   guildId: string;
   hand: string;
+  redDoraTiles?: string | null;
   bestShanten: number;
   bestDiscardCount?: number | null;
   shantenFilter: string;
@@ -928,9 +921,7 @@ async function nanikiruResultEmbed(problem: {
 
   return new EmbedBuilder()
     .setTitle("平面何切る 回答結果")
-    .setDescription(
-      `手牌: ${formatHand(question.hand)}\n${formatNanikiruContext(context)}\n最善打牌後: ${shantenLabel(question.bestShanten)}\n同向聴候補: ${question.bestDiscardCount}種\n回答数: ${problem.answers.length}`
-    )
+    .setDescription(`${formatNanikiruContext(context)}\n${formatNanikiruHand(question)}\n回答数: ${problem.answers.length}`)
     .addFields(
       {
         name: "出題条件",
@@ -1078,6 +1069,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
       questionId,
       guildId,
       hand: serializeHand(question.hand),
+      redDoraTiles: serializeRedDoraTiles(question.redDoraTiles),
       bestShanten: question.bestShanten,
       bestDiscardCount: question.bestDiscardCount,
       shantenFilter: handInput ? "manual" : filter,

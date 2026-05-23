@@ -7,8 +7,10 @@ import {
   evaluateDiscardShanten,
   formatNanikiruContext,
   formatHand,
+  formatNanikiruHand,
   generateNanikiruQuestion,
   parseHandInput,
+  parseHandInputWithRed,
   parseHonorTileMode,
   parseTileInput,
   tileLabel,
@@ -43,6 +45,13 @@ describe("nanikiru", () => {
     expect(formatHand(parseHandInput("123m 456p 3566s 東南白中"))).toBe("123m 456p 3566s 東南白中");
   });
 
+  it("parses and formats red fives", () => {
+    const hand = parseHandInputWithRed("123m248p12334408s");
+    expect(formatNanikiruHand(hand)).toBe("123m 248p 1233445(赤)8s");
+    expect(formatNanikiruHand(parseHandInputWithRed("23445066s123m11p東"))).toBe("123m 11p 234455(赤)66s 東");
+    expect(() => parseHandInputWithRed("00m123p456s東南白中發西")).toThrow("赤ドラ");
+  });
+
   it("parses single tile input for dora", () => {
     expect(parseTileInput("5s")).toBe(22);
     expect(parseTileInput("東")).toBe(27);
@@ -51,8 +60,9 @@ describe("nanikiru", () => {
 
   it("formats nanikiru context", () => {
     expect(formatNanikiruContext({ dora: 22, turn: 8, seatWind: "south", roundWind: "east" })).toBe(
-      "ドラ: 5s / 赤ドラ: 5m 5p 5s / 巡目: 8巡目 / 自風: 南 / 場風: 東"
+      "ドラ5s 東1局 南家 8巡目"
     );
+    expect(formatNanikiruContext({ dora: 12, turn: 2, seatWind: "west", roundWind: "east" })).toBe("ドラ4p 東1局 西家 2巡目");
   });
 
   it("creates nanikiru context with overrides", () => {
@@ -89,6 +99,7 @@ describe("nanikiru", () => {
   it("creates a manual nanikiru question", () => {
     const question = createNanikiruQuestionFromHand("123m456p3566s東南白中");
     expect(formatHand(question.hand)).toBe("123m 456p 3566s 東南白中");
+    expect(question.redDoraTiles).toEqual([]);
     expect(question.bestShanten).toBeGreaterThanOrEqual(0);
     expect(question.bestDiscardCount).toBeGreaterThanOrEqual(1);
   });

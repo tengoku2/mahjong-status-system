@@ -75,7 +75,8 @@ export function calculateHandStats(rows: HandStatRow[], options: HandStatsOption
   const ippatsuWinCount = winRows.filter((row) => row.ippatsuWin === true).length;
   const winScoreTotal = winRows.reduce((sum, row) => sum + (row.winScore ?? 0), 0);
   const dealInScoreTotal = dealInRows.reduce((sum, row) => sum + (row.dealInScore ?? 0), 0);
-  const winOrderTotal = winRows.reduce((sum, row) => sum + (row.winOrder ?? 0), 0);
+  const winOrderRows = winRows.filter((row) => row.winOrder !== null && row.winOrder > 0);
+  const winOrderTotal = winOrderRows.reduce((sum, row) => sum + (row.winOrder ?? 0), 0);
   const uraDoraTotal = winRows.reduce((sum, row) => sum + (row.uraDoraCount ?? 0), 0);
 
   return {
@@ -93,7 +94,7 @@ export function calculateHandStats(rows: HandStatRow[], options: HandStatsOption
     averageDealInScore: average(dealInScoreTotal, dealInCount),
     ippatsuRate: ratio(ippatsuWinCount, winCount),
     averageUraDoraCount: average(uraDoraTotal, winCount),
-    averageWinOrder: average(winOrderTotal, winCount),
+    averageWinOrder: average(winOrderTotal, winOrderRows.length),
     winRate: ratio(winCount, totalHands),
     dealInRate: ratio(dealInCount, totalHands),
     drawRate: ratio(drawCount, totalHands),

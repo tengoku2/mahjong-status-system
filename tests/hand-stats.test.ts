@@ -118,4 +118,47 @@ describe("hand stats", () => {
     expect(stats.averageUraDoraCount).toBeNull();
     expect(stats.bustRate).toBeNull();
   });
+
+  it("ignores unavailable win order values", () => {
+    const stats = calculateHandStats(
+      [
+        {
+          endType: "AGARI",
+          declaredRiichi: false,
+          calledOpenMeld: false,
+          won: true,
+          wonByTsumo: true,
+          dealtIn: false,
+          isTenpaiAtRyukyoku: null,
+          winScore: 8000,
+          dealInScore: null,
+          winOrder: 0,
+          isDama: true,
+          ippatsuWin: null,
+          uraDoraCount: null
+        },
+        {
+          endType: "AGARI",
+          declaredRiichi: false,
+          calledOpenMeld: false,
+          won: true,
+          wonByTsumo: false,
+          dealtIn: false,
+          isTenpaiAtRyukyoku: null,
+          winScore: 5200,
+          dealInScore: null,
+          winOrder: null,
+          isDama: true,
+          ippatsuWin: null,
+          uraDoraCount: null
+        }
+      ],
+      {
+        totalGames: 1,
+        bustCount: 0
+      }
+    );
+
+    expect(stats.averageWinOrder).toBeNull();
+  });
 });

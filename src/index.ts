@@ -219,7 +219,7 @@ function handStatsFields(stats: AggregatedHandStats) {
         `流局聴牌率: ${formatNullableRate(stats.ryukyokuTenpaiRate)}`,
         `平均和了: ${formatNullableAverage(stats.averageWinScore, 0)}点`,
         `平均放銃: ${formatNullableAverage(stats.averageDealInScore, 0)}点`,
-        `平均和了順目: ${formatNullableAverage(stats.averageWinOrder, 1)}`,
+        `平均和了順数: ${formatNullableAverage(stats.averageWinOrder, 1)}`,
         `飛び率: ${formatNullableRate(stats.bustRate)}`
       ].join("\n"),
       inline: true

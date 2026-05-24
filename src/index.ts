@@ -633,10 +633,14 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
       const displayPoint =
         isMvpRankingEntry(entry)
           ? showMvpPenalty
-            ? `${formatPoint(entry.rawTotalPoint)}pt${formatPenaltySuffix(entry.penaltyPoint)}`
+            ? `${formatPoint(entry.rawTotalPoint)}pt`
             : `${formatPoint(entry.totalPoint)}pt`
           : `${formatPoint(entry.totalPoint)}pt`;
-      return `${index + 1}. ${movement}${name} ${displayPoint} (${entry.games}\u6226 / \u5e73\u5747${formatPoint(entry.averagePoint)}pt / \u5e73\u5747\u9806\u4f4d${entry.averageRank.toFixed(2)})`;
+      const detailParts = [`${entry.games}\u6226`, `\u5e73\u5747\u9806\u4f4d ${entry.averageRank.toFixed(2)}`];
+      if (isMvpRankingEntry(entry) && showMvpPenalty && entry.penaltyPoint > 0) {
+        detailParts.push(`\u501f\u91d1${formatPenaltySuffix(entry.penaltyPoint)}`);
+      }
+      return `${movement}${index + 1}. ${name} ${displayPoint}\n   ${detailParts.join(" / ")}`;
     })
   );
 
@@ -648,7 +652,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
           `${rankingScope} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
             tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
           }
-\n${lines.join("\n") || "\u5bfe\u8c61\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093"}`
+\n${lines.join("\n\n") || "\u5bfe\u8c61\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093"}`
         )
     ]
   });

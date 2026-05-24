@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { calculateSeasonAwards } from "../src/awards.js";
-import type { RecordInput } from "../src/records.js";
+import type { HandRecordInput, RecordInput } from "../src/records.js";
 
 function result(matchId: string, day: number, userId: string, rank: number, rawScore: number, point: number): RecordInput {
   return {
@@ -12,6 +12,16 @@ function result(matchId: string, day: number, userId: string, rank: number, rawS
       matchId,
       playedAt: new Date(2026, 2, day, 12, 0, 0)
     }
+  };
+}
+
+function hand(userId: string, options: Partial<HandRecordInput> = {}): HandRecordInput {
+  return {
+    userId,
+    won: false,
+    dealtIn: false,
+    winScore: null,
+    ...options
   };
 }
 
@@ -129,5 +139,63 @@ describe("awards", () => {
       { userId: "b", value: 50 },
       { userId: "c", value: 50 }
     ]);
+  });
+
+  it("adds 4p hand-stat awards with a 5-game minimum", () => {
+    const fourPlayerResults = [
+      result("m1", 1, "a", 1, 40000, 30),
+      result("m1", 1, "b", 2, 35000, 0),
+      result("m1", 1, "c", 3, 30000, -10),
+      result("m1", 1, "d", 4, 25000, -20),
+      result("m2", 2, "a", 1, 40000, 30),
+      result("m2", 2, "b", 2, 35000, 0),
+      result("m2", 2, "c", 3, 30000, -10),
+      result("m2", 2, "d", 4, 25000, -20),
+      result("m3", 3, "a", 1, 40000, 30),
+      result("m3", 3, "b", 2, 35000, 0),
+      result("m3", 3, "c", 3, 30000, -10),
+      result("m3", 3, "d", 4, 25000, -20),
+      result("m4", 4, "a", 2, 35000, 0),
+      result("m4", 4, "b", 1, 40000, 30),
+      result("m4", 4, "c", 3, 30000, -10),
+      result("m4", 4, "d", 4, 25000, -20),
+      result("m5", 5, "a", 2, 35000, 0),
+      result("m5", 5, "b", 1, 40000, 30),
+      result("m5", 5, "c", 3, 30000, -10),
+      result("m5", 5, "d", 4, 25000, -20)
+    ];
+    const awards = calculateSeasonAwards(
+      fourPlayerResults,
+      fourPlayerResults,
+      [
+        hand("a", { won: true, winScore: 3900 }),
+        hand("a"),
+        hand("a"),
+        hand("a"),
+        hand("a"),
+        hand("b", { won: true, winScore: 32000 }),
+        hand("b", { won: true, winScore: 32000 }),
+        hand("b", { dealtIn: true }),
+        hand("b"),
+        hand("b"),
+        hand("c", { dealtIn: true }),
+        hand("c", { dealtIn: true }),
+        hand("c"),
+        hand("c"),
+        hand("c"),
+        hand("d"),
+        hand("d"),
+        hand("d"),
+        hand("d"),
+        hand("d")
+      ],
+      5
+    );
+
+    expect(awards.lowestDealInRatePrize).toEqual([
+      { userId: "a", value: 0 },
+      { userId: "d", value: 0 }
+    ]);
+    expect(awards.mostYakumanPrize).toEqual([{ userId: "b", value: 2 }]);
   });
 });

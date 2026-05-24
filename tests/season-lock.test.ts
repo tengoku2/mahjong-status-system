@@ -46,6 +46,10 @@ describe("season lock", () => {
     expect(seasonPenalty(5, 5)).toBe(0);
     expect(seasonPenalty(3, 5)).toBe(10);
     expect(seasonPenalty(0, 0)).toBe(60);
+    expect(seasonPenalty(5, 4)).toBe(7);
+    expect(seasonPenalty(8, 2)).toBe(0);
+    expect(seasonPenalty(6, 0)).toBe(35);
+    expect(seasonPenalty(5, 0)).toBe(35);
     expect(formatPenaltySuffix(0)).toBe("");
     expect(formatPenaltySuffix(14)).toBe(" (-14pt)");
   });

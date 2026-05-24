@@ -696,6 +696,33 @@ ${matchText(record.playedAt)}` ,
     empty,
     "\u540d"
   );
+  const lowestDealInRate =
+    type === "4p"
+      ? await summarizeRecordList<PlayerRecord>(
+          currentRecords.lowestDealInRate,
+          async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(1)}%`,
+          `${currentRecords.qualifiedMinGames}戦以上の記録なし`,
+          "\u540d"
+        )
+      : "4人半荘のみ";
+  const highestWinRate =
+    type === "4p"
+      ? await summarizeRecordList<PlayerRecord>(
+          currentRecords.highestWinRate,
+          async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(1)}%`,
+          `${currentRecords.qualifiedMinGames}戦以上の記録なし`,
+          "\u540d"
+        )
+      : "4人半荘のみ";
+  const mostYakuman =
+    type === "4p"
+      ? await summarizeRecordList<PlayerRecord>(
+          currentRecords.mostYakuman,
+          async (record) => `${await nameFor(record.userId)} ${record.value}回`,
+          empty,
+          "\u540d"
+        )
+      : "4人半荘のみ";
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
@@ -708,7 +735,10 @@ ${matchText(record.playedAt)}` ,
         )
         .addFields(
           { name: "\u6700\u9ad8\u30b9\u30b3\u30a2", value: highestRawScore, inline: false },
-          { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: false }
+          { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: false },
+          { name: "\u6700\u4f4e\u653e\u9283\u7387", value: lowestDealInRate, inline: false },
+          { name: "\u6700\u9ad8\u548c\u4e86\u7387", value: highestWinRate, inline: false },
+          { name: "\u6700\u591a\u5f79\u6e80", value: mostYakuman, inline: false }
         )
     ]
   });
@@ -768,12 +798,22 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
     async (entry) => `${await nameFor(entry.userId)} ${entry.value}戦`,
     `${awards.minGames}戦以上の記録なし`
   );
+  const lowestDealInRatePrize = await summarizeAwardList(
+    awards.lowestDealInRatePrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(1)}%`,
+    `4人半荘${awards.minGames}戦以上の記録なし`
+  );
+  const mostYakumanPrize = await summarizeAwardList(
+    awards.mostYakumanPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}回`,
+    `4人半荘${awards.minGames}戦以上の記録なし`
+  );
 
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
         .setTitle(`白鳳会 シーズン表彰 ${formatSeasonLabel(season)}`)
-        .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 参加条件: ${awards.minGames}戦以上`)
+        .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 参加条件: ${awards.minGames}戦以上 / 放銃率・役満は4人半荘のみ`)
         .addFields(
           { name: "MVP", value: mvp, inline: false },
           { name: "トップ賞", value: topPrize, inline: true },
@@ -781,7 +821,9 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
           { name: "最高スコア賞", value: highestScorePrize, inline: true },
           { name: "連続トップ賞", value: topStreakPrize, inline: true },
           { name: "連続ラス回避賞", value: noLastStreakPrize, inline: true },
-          { name: "最多対局賞", value: participationPrize, inline: true }
+          { name: "最多対局賞", value: participationPrize, inline: true },
+          { name: "最低放銃率賞", value: lowestDealInRatePrize, inline: true },
+          { name: "最多役満賞", value: mostYakumanPrize, inline: true }
         )
     ]
   });

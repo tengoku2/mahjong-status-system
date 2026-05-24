@@ -1,4 +1,4 @@
-import type { RecordInput } from "./records.js";
+import type { HandRecordInput, RecordInput } from "./records.js";
 
 export interface AwardSummary {
   userId: string;
@@ -15,6 +15,8 @@ export interface SeasonAwards {
   topStreakPrize: AwardSummary[];
   noLastStreakPrize: AwardSummary[];
   participationPrize: AwardSummary[];
+  lowestDealInRatePrize: AwardSummary[];
+  mostYakumanPrize: AwardSummary[];
 }
 
 function selectHighest(entries: AwardSummary[]): AwardSummary[] {
@@ -113,7 +115,14 @@ function resolveMvpTie(results: RecordInput[], tiedUserIds: string[], averageRan
   return winners.length > 0 ? winners : tiedUserIds;
 }
 
-export function calculateSeasonAwards(results: RecordInput[], minGames = 5): SeasonAwards {
+export function calculateSeasonAwards(
+  results: RecordInput[],
+  fourPlayerResultsOrMinGames: RecordInput[] | number = [],
+  fourPlayerHands: HandRecordInput[] = [],
+  minGames = 5
+): SeasonAwards {
+  const fourPlayerResults = Array.isArray(fourPlayerResultsOrMinGames) ? fourPlayerResultsOrMinGames : results;
+  minGames = typeof fourPlayerResultsOrMinGames === "number" ? fourPlayerResultsOrMinGames : minGames;
   const gamesByUser = new Map<string, number>();
   const pointByUser = new Map<string, number>();
   const topsByUser = new Map<string, number>();
@@ -172,6 +181,50 @@ export function calculateSeasonAwards(results: RecordInput[], minGames = 5): Sea
   const resolvedMvpIds = resolveMvpTie(eligibleResults, rawMvp.map((entry) => entry.userId), averageRankByUser);
   const mvp = rawMvp.filter((entry) => resolvedMvpIds.includes(entry.userId));
 
+  const games4pByUser = new Map<string, number>();
+  for (const result of fourPlayerResults) {
+    games4pByUser.set(result.userId, (games4pByUser.get(result.userId) ?? 0) + 1);
+  }
+  const eligibleUsers4p = [...games4pByUser.entries()].filter(([, games]) => games >= minGames).map(([userId]) => userId);
+  const eligibleSet4p = new Set(eligibleUsers4p);
+  const handSummaryByUser = new Map<string, { totalHands: number; dealInCount: number; yakumanCount: number }>();
+  for (const hand of fourPlayerHands) {
+    if (!eligibleSet4p.has(hand.userId)) {
+      continue;
+    }
+    const summary = handSummaryByUser.get(hand.userId) ?? {
+      totalHands: 0,
+      dealInCount: 0,
+      yakumanCount: 0
+    };
+    summary.totalHands += 1;
+    summary.dealInCount += hand.dealtIn ? 1 : 0;
+    summary.yakumanCount += hand.won && (hand.winScore ?? 0) >= 32000 ? 1 : 0;
+    handSummaryByUser.set(hand.userId, summary);
+  }
+
+  const lowestDealInRatePrize = selectLowest(
+    eligibleUsers4p
+      .map((userId) => {
+        const summary = handSummaryByUser.get(userId);
+        return summary && summary.totalHands > 0
+          ? {
+              userId,
+              value: (summary.dealInCount / summary.totalHands) * 100
+            }
+          : null;
+      })
+      .filter((entry): entry is AwardSummary => entry !== null)
+  );
+  const mostYakumanPrize = selectHighest(
+    eligibleUsers4p
+      .map((userId) => ({
+        userId,
+        value: handSummaryByUser.get(userId)?.yakumanCount ?? 0
+      }))
+      .filter((entry) => entry.value > 0)
+  );
+
   return {
     minGames,
     eligibleGames,
@@ -194,6 +247,8 @@ export function calculateSeasonAwards(results: RecordInput[], minGames = 5): Sea
         .map((userId) => ({ userId, value: streakNoLastByUser.get(userId) ?? 0 }))
         .filter((entry) => entry.value >= 2)
     ),
-    participationPrize: selectHighest(eligibleUsers.map((userId) => ({ userId, value: gamesByUser.get(userId) ?? 0 })))
+    participationPrize: selectHighest(eligibleUsers.map((userId) => ({ userId, value: gamesByUser.get(userId) ?? 0 }))),
+    lowestDealInRatePrize,
+    mostYakumanPrize
   };
 }

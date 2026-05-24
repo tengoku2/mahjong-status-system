@@ -100,7 +100,7 @@ export function formatPenaltySuffix(penaltyPoint: number): string {
 
 export function seasonPenalty(games4p: number, games3p: number): number {
   const debt4p = Math.max(0, 25 - games4p * 5);
-  const debt3p = Math.max(0, 35 - games3p * 7);
+  const debt3p = games4p >= 5 && games4p + games3p >= 10 ? 0 : Math.max(0, 35 - games3p * 7);
   return debt4p + debt3p;
 }
 

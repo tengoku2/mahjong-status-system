@@ -718,7 +718,30 @@ export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
 export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
   const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
-  return calculateRecords(normalizedType, results);
+  const handRecords =
+    normalizedType === "4p"
+      ? await prisma.handPlayerStat.findMany({
+          where: {
+            hand: {
+              match: {
+                guildId,
+                type: normalizedType,
+                tournamentName: normalizeTournamentName(tournamentName),
+                matchId: {
+                  in: [...new Set(results.map((result) => result.match.matchId))]
+                }
+              }
+            }
+          },
+          select: {
+            userId: true,
+            won: true,
+            dealtIn: true,
+            winScore: true
+          }
+        })
+      : [];
+  return calculateRecords(normalizedType, results, 5, handRecords);
 }
 
 export async function recordsForDateRange(
@@ -730,12 +753,59 @@ export async function recordsForDateRange(
 ) {
   const normalizedType = normalizeMahjongType(type);
   const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName);
-  return calculateRecords(normalizedType, results);
+  const handRecords =
+    normalizedType === "4p"
+      ? await prisma.handPlayerStat.findMany({
+          where: {
+            hand: {
+              match: {
+                guildId,
+                type: normalizedType,
+                tournamentName: normalizeTournamentName(tournamentName),
+                matchId: {
+                  in: [...new Set(results.map((result) => result.match.matchId))]
+                }
+              }
+            }
+          },
+          select: {
+            userId: true,
+            won: true,
+            dealtIn: true,
+            winScore: true
+          }
+        })
+      : [];
+  return calculateRecords(normalizedType, results, 5, handRecords);
 }
 
 export async function seasonAwards(guildId: string, start: Date, end: Date) {
-  const results = await getResultsForDateRange(guildId, ["3p", "4p"], start, end, undefined, undefined, true);
-  return calculateSeasonAwards(results);
+  const [results, fourPlayerResults, fourPlayerHands] = await Promise.all([
+    getResultsForDateRange(guildId, ["3p", "4p"], start, end, undefined, undefined, true),
+    getResultsForDateRange(guildId, ["4p"], start, end, undefined, undefined, true),
+    prisma.handPlayerStat.findMany({
+      where: {
+        hand: {
+          match: {
+            guildId,
+            type: "4p",
+            tournamentName: null,
+            playedAt: {
+              gte: start,
+              lt: end
+            }
+          }
+        }
+      },
+      select: {
+        userId: true,
+        won: true,
+        dealtIn: true,
+        winScore: true
+      }
+    })
+  ]);
+  return calculateSeasonAwards(results, fourPlayerResults, fourPlayerHands);
 }
 
 export async function deleteMatch(guildId: string, matchId: string) {

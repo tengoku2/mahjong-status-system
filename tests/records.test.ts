@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateRecords, type RecordInput } from "../src/records.js";
+import { calculateRecords, type HandRecordInput, type RecordInput } from "../src/records.js";
 
 function result(matchId: string, day: number, userId: string, rank: number, rawScore: number, point: number): RecordInput {
   return {
@@ -11,6 +11,16 @@ function result(matchId: string, day: number, userId: string, rank: number, rawS
       matchId,
       playedAt: new Date(2026, 4, day, 12, 0, 0)
     }
+  };
+}
+
+function hand(userId: string, options: Partial<HandRecordInput> = {}): HandRecordInput {
+  return {
+    userId,
+    won: false,
+    dealtIn: false,
+    winScore: null,
+    ...options
   };
 }
 
@@ -32,7 +42,19 @@ describe("records", () => {
         result("m3", 3, "c", 3, 21000, -19),
         result("m3", 3, "d", 4, 4000, -56)
       ],
-      2
+      2,
+      [
+        hand("a", { won: true, winScore: 8000 }),
+        hand("a", { won: true, winScore: 32000 }),
+        hand("a"),
+        hand("b", { dealtIn: true }),
+        hand("b", { won: true, winScore: 3900 }),
+        hand("b"),
+        hand("c"),
+        hand("c"),
+        hand("d", { dealtIn: true }),
+        hand("d", { dealtIn: true })
+      ],
     );
 
     expect(records.totalMatches).toBe(3);
@@ -45,6 +67,14 @@ describe("records", () => {
       { userId: "b", value: 100 },
       { userId: "c", value: 100 }
     ]);
+    expect(records.lowestDealInRate).toEqual([
+      { userId: "a", value: 0 },
+      { userId: "c", value: 0 }
+    ]);
+    expect(records.highestWinRate).toHaveLength(1);
+    expect(records.highestWinRate[0].userId).toBe("a");
+    expect(records.highestWinRate[0].value).toBeCloseTo(200 / 3);
+    expect(records.mostYakuman).toEqual([{ userId: "a", value: 1 }]);
   });
 
   it("requires enough games for average rank records", () => {
@@ -96,5 +126,22 @@ describe("records", () => {
     ], 2);
 
     expect(records.bestLastAvoidanceRate).toEqual([]);
+  });
+
+  it("requires enough games for deal-in and win rate records", () => {
+    const records = calculateRecords(
+      "4p",
+      [
+        result("m1", 1, "a", 1, 42000, 62),
+        result("m1", 1, "b", 2, 31000, 11),
+        result("m1", 1, "c", 3, 25000, -15),
+        result("m1", 1, "d", 4, 2000, -58)
+      ],
+      5,
+      [hand("a", { won: true, winScore: 8000 }), hand("b", { dealtIn: true })]
+    );
+
+    expect(records.lowestDealInRate).toEqual([]);
+    expect(records.highestWinRate).toEqual([]);
   });
 });

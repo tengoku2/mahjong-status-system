@@ -24,6 +24,13 @@ export interface MatchRecord {
   playedAt: Date;
 }
 
+export interface HandRecordInput {
+  userId: string;
+  won: boolean;
+  dealtIn: boolean;
+  winScore: number | null;
+}
+
 export interface MarginRecord extends MatchRecord {
   secondUserId: string;
 }
@@ -36,6 +43,9 @@ export interface MahjongRecords {
   bestAverageRank: PlayerRecord[];
   longestTopStreak: PlayerRecord[];
   bestLastAvoidanceRate: PlayerRecord[];
+  lowestDealInRate: PlayerRecord[];
+  highestWinRate: PlayerRecord[];
+  mostYakuman: PlayerRecord[];
 }
 
 interface PlayerAggregate {
@@ -77,7 +87,12 @@ function sortPlayerRecords<T extends PlayerRecord>(records: T[]): T[] {
   return [...records].sort((a, b) => a.userId.localeCompare(b.userId));
 }
 
-export function calculateRecords(type: MahjongType, results: RecordInput[], qualifiedMinGames = 5): MahjongRecords {
+export function calculateRecords(
+  type: MahjongType,
+  results: RecordInput[],
+  qualifiedMinGames = 5,
+  handRecords: HandRecordInput[] = []
+): MahjongRecords {
   const maxRank = expectedPlayerCount(type);
   const matches = new Map<string, RecordInput[]>();
   const players = new Map<string, PlayerAggregate>();
@@ -112,6 +127,7 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
   const topRecords: PlayerRecord[] = [];
   const averageRankRecords: PlayerRecord[] = [];
   const lastAvoidanceRateRecords: PlayerRecord[] = [];
+  const qualifiedUsers = new Set<string>();
 
   for (const player of players.values()) {
     topRecords.push({
@@ -120,6 +136,7 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
     });
 
     if (player.games >= qualifiedMinGames) {
+      qualifiedUsers.add(player.userId);
       averageRankRecords.push({
         userId: player.userId,
         value: player.rankSum / player.games
@@ -127,6 +144,44 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
       lastAvoidanceRateRecords.push({
         userId: player.userId,
         value: ((player.games - player.lasts) / player.games) * 100
+      });
+    }
+  }
+
+  const handSummaryByUser = new Map<string, { totalHands: number; dealInCount: number; winCount: number; yakumanCount: number }>();
+  for (const record of handRecords) {
+    const summary = handSummaryByUser.get(record.userId) ?? {
+      totalHands: 0,
+      dealInCount: 0,
+      winCount: 0,
+      yakumanCount: 0
+    };
+    summary.totalHands += 1;
+    summary.dealInCount += record.dealtIn ? 1 : 0;
+    summary.winCount += record.won ? 1 : 0;
+    summary.yakumanCount += record.won && (record.winScore ?? 0) >= 32000 ? 1 : 0;
+    handSummaryByUser.set(record.userId, summary);
+  }
+
+  const dealInRateRecords: PlayerRecord[] = [];
+  const winRateRecords: PlayerRecord[] = [];
+  const yakumanRecords: PlayerRecord[] = [];
+
+  for (const [userId, summary] of handSummaryByUser.entries()) {
+    if (summary.totalHands > 0 && qualifiedUsers.has(userId)) {
+      dealInRateRecords.push({
+        userId,
+        value: (summary.dealInCount / summary.totalHands) * 100
+      });
+      winRateRecords.push({
+        userId,
+        value: (summary.winCount / summary.totalHands) * 100
+      });
+    }
+    if (summary.yakumanCount > 0) {
+      yakumanRecords.push({
+        userId,
+        value: summary.yakumanCount
       });
     }
   }
@@ -156,6 +211,9 @@ export function calculateRecords(type: MahjongType, results: RecordInput[], qual
     mostTops: sortPlayerRecords(selectBestRecords(topRecords)),
     bestAverageRank: sortPlayerRecords(selectBestRecords(averageRankRecords, true)),
     longestTopStreak: sortPlayerRecords(selectBestRecords(topStreakRecords.filter((record) => record.value >= 2))),
-    bestLastAvoidanceRate: sortPlayerRecords(selectBestRecords(lastAvoidanceRateRecords))
+    bestLastAvoidanceRate: sortPlayerRecords(selectBestRecords(lastAvoidanceRateRecords)),
+    lowestDealInRate: sortPlayerRecords(selectBestRecords(dealInRateRecords, true)),
+    highestWinRate: sortPlayerRecords(selectBestRecords(winRateRecords)),
+    mostYakuman: sortPlayerRecords(selectBestRecords(yakumanRecords))
   };
 }

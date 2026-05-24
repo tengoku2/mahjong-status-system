@@ -1222,24 +1222,20 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
     return;
   }
 
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   const problem = await prisma.nanikiruProblem.findUnique({
     where: { questionId },
     include: { answers: true }
   });
   if (!problem || problem.guildId !== interaction.guildId) {
-    await interaction.reply({
-      content: "この問題の受付は終了しました。新しく `/mjs nanikiru` を実行してください。",
-      flags: MessageFlags.Ephemeral
-    });
+    await interaction.editReply("この問題の受付は終了しました。新しく `/mjs nanikiru` を実行してください。");
     return;
   }
 
   if (problem.closedAt || problem.closesAt.getTime() <= Date.now()) {
     await closeNanikiruQuestion(questionId);
-    await interaction.reply({
-      content: "この問題の回答受付は終了しました。",
-      flags: MessageFlags.Ephemeral
-    });
+    await interaction.editReply("この問題の回答受付は終了しました。");
     return;
   }
 
@@ -1247,7 +1243,7 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
   const context = storedContext(problem);
   const selectedTile = Number(interaction.values[0]);
   if (!Number.isInteger(selectedTile) || !uniqueDiscardTiles(question.hand).includes(selectedTile)) {
-    await interaction.reply({ content: "不正な回答です。", flags: MessageFlags.Ephemeral });
+    await interaction.editReply("不正な回答です。");
     return;
   }
 
@@ -1275,16 +1271,13 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
   await interaction.message.edit({
     embeds: [nanikiruEmbed(question, context, answers.length, problem.note)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
-  });
+  }).catch((error) => console.error(error));
 
   const distribution = await nanikiruDistributionWithNames(problem.guildId, answers);
   const answerText = previousAnswer === undefined
     ? `あなたの回答: ${tileLabel(selectedTile)}`
     : `あなたの回答を ${tileLabel(previousAnswer)} から ${tileLabel(selectedTile)} に変更しました。`;
-  await interaction.reply({
-    content: `${answerText}\n現在の回答分布:\n${distribution}`,
-    flags: MessageFlags.Ephemeral
-  });
+  await interaction.editReply(`${answerText}\n現在の回答分布:\n${distribution}`);
 }
 
 function confirmRow(action: "del" | "undo", matchId: string) {

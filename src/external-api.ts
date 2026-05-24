@@ -172,6 +172,11 @@ function optionalInteger(value: unknown, fieldName: string): number | undefined 
   return requireInteger(value, fieldName);
 }
 
+function optionalPositiveInteger(value: unknown, fieldName: string): number | undefined {
+  const parsed = optionalInteger(value, fieldName);
+  return parsed === undefined || parsed <= 0 ? undefined : parsed;
+}
+
 function optionalBoolean(value: unknown, fieldName: string): boolean | undefined {
   if (value === undefined || value === null) {
     return undefined;
@@ -278,7 +283,7 @@ function normalizeHandPlayerStats(value: unknown): ParsedExternalHandPlayerStat[
       dealtIn: optionalBoolean(stat.dealtIn, `hands[].playerStats[${index}].dealtIn`),
       winScore: optionalInteger(stat.winScore, `hands[].playerStats[${index}].winScore`),
       dealInScore: optionalInteger(stat.dealInScore, `hands[].playerStats[${index}].dealInScore`),
-      winOrder: optionalInteger(stat.winOrder, `hands[].playerStats[${index}].winOrder`),
+      winOrder: optionalPositiveInteger(stat.winOrder, `hands[].playerStats[${index}].winOrder`),
       isDama: optionalBoolean(stat.isDama, `hands[].playerStats[${index}].isDama`),
       ippatsuWin: optionalBoolean(stat.ippatsuWin, `hands[].playerStats[${index}].ippatsuWin`),
       uraDoraCount: optionalInteger(stat.uraDoraCount, `hands[].playerStats[${index}].uraDoraCount`)

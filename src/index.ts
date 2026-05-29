@@ -41,14 +41,14 @@ import {
   type Tile
 } from "./nanikiru.js";
 import { parsePlayedAtInput } from "./date-input.js";
-import { currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, seasonWindow } from "./periods.js";
+import { businessDateParts, currentSeason, formatPeriodLabel, formatSeasonLabel, previousSeason, seasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { formatPenaltySuffix, isManager, lockStateForPeriod, lockStateForSeason, latestConcludedSeason } from "./season-lock.js";
-import { aggregateHandStats, aggregateStats, buildMvpRankingFromResults, createMatch, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type AggregatedHandStats, type MvpRankingEntry, type RankingEntry } from "./services.js";
+import { aggregateHandStats, aggregateStats, applyBonusToRankingEntries, buildMvpRankingFromResults, buildSeasonBonusMap, createMatch, createSeasonBonus, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, getSeasonBonuses, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type AggregatedHandStats, type MvpRankingEntry, type RankingEntry } from "./services.js";
 import type { MatchRecord, PlayerRecord } from "./records.js";
-import type { MahjongType, Period, PlayerInput, SeasonCode } from "./types.js";
+import type { MahjongType, Period, PlayerInput, SeasonBonusTarget, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -110,6 +110,10 @@ function rankingPeriodOption(interaction: ChatInputCommandInteraction): Period {
 function seasonCodeOption(interaction: ChatInputCommandInteraction): SeasonCode | undefined {
   const season = interaction.options.getString("season");
   return season ? (season as SeasonCode) : undefined;
+}
+
+function bonusTargetOption(interaction: ChatInputCommandInteraction): SeasonBonusTarget {
+  return (interaction.options.getString("target") ?? "yakuman_bonus") as SeasonBonusTarget;
 }
 
 function resolveSeasonOption(interaction: ChatInputCommandInteraction) {
@@ -180,9 +184,10 @@ function parsePlayedAtOption(interaction: ChatInputCommandInteraction): Date {
 }
 
 function formatDate(date: Date): string {
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
+  const parts = businessDateParts(date);
+  const month = `${parts.month + 1}`.padStart(2, "0");
+  const day = `${parts.day}`.padStart(2, "0");
+  return `${parts.year}-${month}-${day}`;
 }
 
 function formatNullableRate(value: number | null): string {
@@ -588,6 +593,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   }
   const showMovement = Boolean(season && isCurrentSeasonWindow(season));
   const showMvpPenalty = !type && (season ? isCurrentSeasonWindow(season) : true);
+  const bonusByUser = season ? buildSeasonBonusMap(await getSeasonBonuses(guildId, season, rankingTypes)) : new Map<string, number>();
   let computedRankingData: {
     current: Array<RankingEntry | MvpRankingEntry>;
     previous: Array<RankingEntry | MvpRankingEntry>;
@@ -603,18 +609,23 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
           latestMatchId: null
         };
     computedRankingData = {
-      current: buildMvpRankingFromResults(resultSet.currentResults),
-      previous: buildMvpRankingFromResults(resultSet.previousResults),
+      current: buildMvpRankingFromResults(resultSet.currentResults, bonusByUser),
+      previous: buildMvpRankingFromResults(resultSet.previousResults, bonusByUser),
       latestMatchId: resultSet.latestMatchId
     };
   } else if (season) {
-    computedRankingData = showMovement
+    const rankingData = showMovement
       ? await rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
       : {
           current: await rankingForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName),
           previous: [],
           latestMatchId: null
         };
+    computedRankingData = {
+      current: applyBonusToRankingEntries(rankingData.current, bonusByUser),
+      previous: applyBonusToRankingEntries(rankingData.previous, bonusByUser),
+      latestMatchId: rankingData.latestMatchId
+    };
   } else {
     computedRankingData = {
       current: type
@@ -751,7 +762,7 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
   if (!(await ensureSeasonLockAccess(interaction, "full_lock", { season }))) {
     return;
   }
-  const awards = await seasonAwards(guildId, season.start, season.end);
+  const awards = await seasonAwards(guildId, season);
   const nameCache = new Map<string, string>();
   const nameFor = async (userId: string) => {
     const cached = nameCache.get(userId);
@@ -893,6 +904,40 @@ async function handleSeasonUnlock(interaction: ChatInputCommandInteraction) {
   });
 
   await interaction.editReply(`${formatSeasonLabel(season)} のロックを解除しました。`);
+}
+
+function bonusTargetLabel(target: SeasonBonusTarget): string {
+  if (target === "yakuman_bonus") {
+    return "役満ボーナス";
+  }
+  return target;
+}
+
+async function handleSeasonBonus(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
+    return;
+  }
+
+  const user = interaction.options.getUser("user", true);
+  const type = typeOption(interaction);
+  if (type !== "3p" && type !== "4p") {
+    throw new Error("シーズン加点は3人半荘または4人半荘のみ登録できます。");
+  }
+  const season = resolveSeasonOption(interaction);
+  const target = bonusTargetOption(interaction);
+  const point = interaction.options.getNumber("point", true);
+  await assertGuildMember(interaction, user.id);
+
+  const bonus = await createSeasonBonus(guildId, user.id, type, season, target, point);
+  const name = await displayName(guildId, await fetchMember(interaction, user.id), user.id);
+  await interaction.editReply(
+    `${formatSeasonLabel(season)} / ${typeLabel(type)} に ${bonusTargetLabel(target)} を登録しました。\n対象: ${name}\n加点: ${formatPoint(
+      point
+    )}pt\nID: ${bonus.seasonBonusId}`
+  );
 }
 
 function nanikiruDescription(question: NanikiruQuestion, context: NanikiruContext, note?: string | null): string {
@@ -1476,6 +1521,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs best` レコードを表示",
     "`/mjs awards` シーズン表彰を表示",
     "`/mjs export` CSVを出力",
+    "`/mjs bonus` 管理者向け。シーズン加点を登録",
     "`/mjs season_lock` ロック中の運営閲覧チャンネルを設定",
     "`/mjs season_unlock` 直前シーズンのロックを解除",
     "`/mjs nanikiru` 何切る問題を出題",
@@ -1526,6 +1572,8 @@ async function handleChatInput(interaction: ChatInputCommandInteraction) {
     await handleAwards(interaction);
   } else if (subcommand === "export") {
     await handleExport(interaction);
+  } else if (subcommand === "bonus") {
+    await handleSeasonBonus(interaction);
   } else if (subcommand === "season_lock") {
     await handleSeasonLock(interaction);
   } else if (subcommand === "season_unlock") {

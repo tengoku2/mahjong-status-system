@@ -8,6 +8,9 @@ export interface SeasonWindow {
   end: Date;
 }
 
+const BUSINESS_UTC_OFFSET_HOURS = 3;
+const BUSINESS_UTC_OFFSET_MS = BUSINESS_UTC_OFFSET_HOURS * 60 * 60 * 1000;
+
 export const periodChoices = [
   { name: "直近5戦", value: "recent_5" },
   { name: "直近10戦", value: "recent_10" },
@@ -60,8 +63,9 @@ export function formatPeriodLabel(period: Period, now = new Date()): string {
   }
 
   if (period === "month") {
-    const month = `${now.getMonth() + 1}`.padStart(2, "0");
-    return `${now.getFullYear()}年${month}月`;
+    const parts = businessDateParts(now);
+    const month = `${parts.month + 1}`.padStart(2, "0");
+    return `${parts.year}年${month}月`;
   }
 
   return periodLabels[period];
@@ -88,22 +92,23 @@ export function calendarStart(period: Period, now = new Date()): Date | null {
     return null;
   }
 
-  return new Date(now.getFullYear(), now.getMonth() - months, 1, 0, 0, 0, 0);
+  const parts = businessDateParts(now);
+  return businessMonthStart(parts.year, parts.month - months);
 }
 
 export function currentSeason(now = new Date()): SeasonWindow {
-  const month = now.getMonth();
+  const { year, month } = businessDateParts(now);
   if (month >= 2 && month <= 4) {
-    return seasonWindow("ranoh", now.getFullYear() - 2000);
+    return seasonWindow("ranoh", year - 2000);
   }
   if (month >= 5 && month <= 7) {
-    return seasonWindow("chikuoh", now.getFullYear() - 2000);
+    return seasonWindow("chikuoh", year - 2000);
   }
   if (month >= 8 && month <= 10) {
-    return seasonWindow("kikuoh", now.getFullYear() - 2000);
+    return seasonWindow("kikuoh", year - 2000);
   }
 
-  const seasonYear = month >= 11 ? now.getFullYear() - 2000 : now.getFullYear() - 2001;
+  const seasonYear = month >= 11 ? year - 2000 : year - 2001;
   return seasonWindow("baioh", seasonYear);
 }
 
@@ -139,8 +144,8 @@ export function periodDateRange(period: Period, now = new Date()): { start?: Dat
 export function seasonWindow(code: SeasonCode, seasonYear: number): SeasonWindow {
   const meta = seasonMetadata[code];
   const startYear = code === "baioh" ? 2000 + seasonYear : 2000 + seasonYear;
-  const start = new Date(startYear, meta.startMonth, 1, 0, 0, 0, 0);
-  const end = new Date(startYear, meta.startMonth + 3, 1, 0, 0, 0, 0);
+  const start = businessMonthStart(startYear, meta.startMonth);
+  const end = businessMonthStart(startYear, meta.startMonth + 3);
 
   return {
     code,
@@ -149,4 +154,17 @@ export function seasonWindow(code: SeasonCode, seasonYear: number): SeasonWindow
     start,
     end
   };
+}
+
+export function businessDateParts(now = new Date()): { year: number; month: number; day: number } {
+  const shifted = new Date(now.getTime() + BUSINESS_UTC_OFFSET_MS);
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth(),
+    day: shifted.getUTCDate()
+  };
+}
+
+function businessMonthStart(year: number, monthIndex: number): Date {
+  return new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0) - BUSINESS_UTC_OFFSET_MS);
 }

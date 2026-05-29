@@ -10,10 +10,10 @@ describe("periods", () => {
 
   it("uses calendar month starts", () => {
     const now = new Date(2026, 4, 7, 12, 0, 0);
-    expect(calendarStart("month", now)?.toISOString()).toBe(new Date(2026, 4, 1).toISOString());
-    expect(calendarStart("three_months", now)?.toISOString()).toBe(new Date(2026, 1, 1).toISOString());
-    expect(calendarStart("half_year", now)?.toISOString()).toBe(new Date(2025, 10, 1).toISOString());
-    expect(calendarStart("year", now)?.toISOString()).toBe(new Date(2025, 4, 1).toISOString());
+    expect(calendarStart("month", now)?.toISOString()).toBe("2026-04-30T21:00:00.000Z");
+    expect(calendarStart("three_months", now)?.toISOString()).toBe("2026-01-31T21:00:00.000Z");
+    expect(calendarStart("half_year", now)?.toISOString()).toBe("2025-10-31T21:00:00.000Z");
+    expect(calendarStart("year", now)?.toISOString()).toBe("2025-04-30T21:00:00.000Z");
   });
 
   it("formats the current month label", () => {
@@ -25,13 +25,13 @@ describe("periods", () => {
   it("builds season windows on a spring-based cycle", () => {
     const season = currentSeason(new Date(2026, 4, 12, 12, 0, 0));
     expect(formatSeasonLabel(season)).toBe("蘭鳳季 26シーズン");
-    expect(season.start.toISOString()).toBe(new Date(2026, 2, 1).toISOString());
-    expect(season.end.toISOString()).toBe(new Date(2026, 5, 1).toISOString());
+    expect(season.start.toISOString()).toBe("2026-02-28T21:00:00.000Z");
+    expect(season.end.toISOString()).toBe("2026-05-31T21:00:00.000Z");
 
     const winter = seasonWindow("baioh", 26);
     expect(formatSeasonLabel(winter)).toBe("梅鳳季 26シーズン");
-    expect(winter.start.toISOString()).toBe(new Date(2026, 11, 1).toISOString());
-    expect(winter.end.toISOString()).toBe(new Date(2027, 2, 1).toISOString());
+    expect(winter.start.toISOString()).toBe("2026-11-30T21:00:00.000Z");
+    expect(winter.end.toISOString()).toBe("2027-02-28T21:00:00.000Z");
   });
 
   it("supports current and previous season period labels and windows", () => {
@@ -43,7 +43,17 @@ describe("periods", () => {
     expect(formatSeasonLabel(previous)).toBe("梅鳳季 25シーズン");
 
     const range = periodDateRange("previous_season", now);
-    expect(range?.start?.toISOString()).toBe(new Date(2025, 11, 1).toISOString());
-    expect(range?.end?.toISOString()).toBe(new Date(2026, 2, 1).toISOString());
+    expect(range?.start?.toISOString()).toBe("2025-11-30T21:00:00.000Z");
+    expect(range?.end?.toISOString()).toBe("2026-02-28T21:00:00.000Z");
+  });
+
+  it("switches business dates and seasons at JST 6:00", () => {
+    const beforeBoundary = new Date(Date.UTC(2026, 4, 31, 20, 59, 59));
+    const afterBoundary = new Date(Date.UTC(2026, 4, 31, 21, 0, 0));
+
+    expect(formatPeriodLabel("month", beforeBoundary)).toBe("2026年05月");
+    expect(formatPeriodLabel("month", afterBoundary)).toBe("2026年06月");
+    expect(formatSeasonLabel(currentSeason(beforeBoundary))).toBe("蘭鳳季 26シーズン");
+    expect(formatSeasonLabel(currentSeason(afterBoundary))).toBe("竹鳳季 26シーズン");
   });
 });

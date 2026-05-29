@@ -12,6 +12,7 @@ model Guild {
   users            User[]
   profiles         UserProfile[]
   matches          Match[]
+  seasonBonuses    SeasonBonus[]
   seasonLockSetting SeasonLockSetting?
   nanikiruSetting  NanikiruGuildSetting?
   nanikiruProblems NanikiruProblem[]
@@ -160,6 +161,24 @@ model SeasonLockSetting {
   guild               Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
   @@map("season_lock_settings")
+}
+
+model SeasonBonus {
+  seasonBonusId String   @id @default(cuid()) @map("season_bonus_id")
+  guildId       String   @map("guild_id")
+  userId        String   @map("user_id")
+  type          String
+  seasonCode    String   @map("season_code")
+  seasonYear    Int      @map("season_year")
+  target        String
+  point         Float
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  guild         Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+
+  @@index([guildId, type, seasonCode, seasonYear])
+  @@index([guildId, userId, seasonCode, seasonYear])
+  @@map("season_bonuses")
 }
 
 model NanikiruProblem {

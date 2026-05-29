@@ -4,9 +4,9 @@ import { calculateHandStats, type HandStatsSummary } from "./hand-stats.js";
 import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { seasonPenalty } from "./season-lock.js";
-import { periodDateRange, recentLimit } from "./periods.js";
+import { periodDateRange, recentLimit, type SeasonWindow } from "./periods.js";
 import { prisma } from "./prisma.js";
-import type { HandInput, MahjongType, Period, PlayerInput } from "./types.js";
+import type { HandInput, MahjongType, Period, PlayerInput, SeasonBonusTarget, SeasonCode } from "./types.js";
 
 export interface ExternalMatchIdentity {
   externalSource: string;
@@ -28,6 +28,18 @@ export interface MvpRankingEntry extends RankingEntry {
   penaltyPoint: number;
   games3p: number;
   games4p: number;
+}
+
+export interface SeasonBonusEntry {
+  seasonBonusId: string;
+  guildId: string;
+  userId: string;
+  type: MahjongType;
+  seasonCode: SeasonCode;
+  seasonYear: number;
+  target: SeasonBonusTarget;
+  point: number;
+  createdAt: Date;
 }
 
 export type AggregatedHandStats = HandStatsSummary;
@@ -59,6 +71,72 @@ export async function ensureGuildAndUsers(guildId: string, userIds: string[], tx
       update: {}
     });
   }
+}
+
+export async function createSeasonBonus(
+  guildId: string,
+  userId: string,
+  type: MahjongType,
+  season: Pick<SeasonWindow, "code" | "seasonYear">,
+  target: SeasonBonusTarget,
+  point: number
+) {
+  await ensureGuildAndUsers(guildId, [userId]);
+  return prisma.seasonBonus.create({
+    data: {
+      guildId,
+      userId,
+      type: normalizeMahjongType(type),
+      seasonCode: season.code,
+      seasonYear: season.seasonYear,
+      target,
+      point
+    }
+  });
+}
+
+export async function getSeasonBonuses(
+  guildId: string,
+  season: Pick<SeasonWindow, "code" | "seasonYear">,
+  types?: MahjongType[]
+): Promise<SeasonBonusEntry[]> {
+  return prisma.seasonBonus.findMany({
+    where: {
+      guildId,
+      seasonCode: season.code,
+      seasonYear: season.seasonYear,
+      type: types ? { in: types.map((type) => normalizeMahjongType(type)) } : undefined
+    },
+    orderBy: [{ createdAt: "asc" }]
+  }) as Promise<SeasonBonusEntry[]>;
+}
+
+export function buildSeasonBonusMap(bonuses: SeasonBonusEntry[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const bonus of bonuses) {
+    map.set(bonus.userId, (map.get(bonus.userId) ?? 0) + bonus.point);
+  }
+  return map;
+}
+
+export function applyBonusToRankingEntries<T extends RankingEntry>(entries: T[], bonusByUser: Map<string, number>): T[] {
+  if (bonusByUser.size === 0) {
+    return entries;
+  }
+  return [...entries]
+    .map((entry) => {
+      const bonus = bonusByUser.get(entry.userId) ?? 0;
+      if (bonus === 0) {
+        return entry;
+      }
+      const totalPoint = entry.totalPoint + bonus;
+      return {
+        ...entry,
+        totalPoint,
+        averagePoint: totalPoint / entry.games
+      };
+    })
+    .sort((a, b) => b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId));
 }
 
 export async function createMatch(
@@ -510,7 +588,10 @@ export async function rankingByTypes(
   return buildRankingFromResults(results);
 }
 
-export function buildMvpRankingFromResults(results: Awaited<ReturnType<typeof getResultsForPeriodByTypes>>): MvpRankingEntry[] {
+export function buildMvpRankingFromResults(
+  results: Awaited<ReturnType<typeof getResultsForPeriodByTypes>>,
+  bonusByUser = new Map<string, number>()
+): MvpRankingEntry[] {
   const grouped = new Map<
     string,
     { userId: string; games: number; rawTotalPoint: number; rankSum: number; games3p: number; games4p: number }
@@ -539,12 +620,13 @@ export function buildMvpRankingFromResults(results: Awaited<ReturnType<typeof ge
   return [...grouped.values()]
     .map((entry) => {
       const penaltyPoint = seasonPenalty(entry.games4p, entry.games3p);
+      const bonusPoint = bonusByUser.get(entry.userId) ?? 0;
       return {
         userId: entry.userId,
         games: entry.games,
-        totalPoint: entry.rawTotalPoint - penaltyPoint,
-        rawTotalPoint: entry.rawTotalPoint,
-        adjustedTotalPoint: entry.rawTotalPoint - penaltyPoint,
+        totalPoint: entry.rawTotalPoint + bonusPoint - penaltyPoint,
+        rawTotalPoint: entry.rawTotalPoint + bonusPoint,
+        adjustedTotalPoint: entry.rawTotalPoint + bonusPoint - penaltyPoint,
         penaltyPoint,
         games3p: entry.games3p,
         games4p: entry.games4p,
@@ -779,10 +861,10 @@ export async function recordsForDateRange(
   return calculateRecords(normalizedType, results, 5, handRecords);
 }
 
-export async function seasonAwards(guildId: string, start: Date, end: Date) {
-  const [results, fourPlayerResults, fourPlayerHands] = await Promise.all([
-    getResultsForDateRange(guildId, ["3p", "4p"], start, end, undefined, undefined, true),
-    getResultsForDateRange(guildId, ["4p"], start, end, undefined, undefined, true),
+export async function seasonAwards(guildId: string, season: SeasonWindow) {
+  const [results, fourPlayerResults, fourPlayerHands, bonuses] = await Promise.all([
+    getResultsForDateRange(guildId, ["3p", "4p"], season.start, season.end, undefined, undefined, true),
+    getResultsForDateRange(guildId, ["4p"], season.start, season.end, undefined, undefined, true),
     prisma.handPlayerStat.findMany({
       where: {
         hand: {
@@ -791,8 +873,8 @@ export async function seasonAwards(guildId: string, start: Date, end: Date) {
             type: "4p",
             tournamentName: null,
             playedAt: {
-              gte: start,
-              lt: end
+              gte: season.start,
+              lt: season.end
             }
           }
         }
@@ -803,9 +885,11 @@ export async function seasonAwards(guildId: string, start: Date, end: Date) {
         dealtIn: true,
         winScore: true
       }
-    })
+    }),
+    getSeasonBonuses(guildId, season, ["3p", "4p"])
   ]);
-  return calculateSeasonAwards(results, fourPlayerResults, fourPlayerHands);
+  const bonusByUser = buildSeasonBonusMap(bonuses);
+  return calculateSeasonAwards(results, fourPlayerResults, fourPlayerHands, 5, bonusByUser);
 }
 
 export async function deleteMatch(guildId: string, matchId: string) {

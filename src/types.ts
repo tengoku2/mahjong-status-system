@@ -15,6 +15,7 @@ export type Period =
   | "all";
 
 export type SeasonCode = "ranoh" | "chikuoh" | "kikuoh" | "baioh";
+export type SeasonBonusTarget = "yakuman_bonus";
 
 export interface PlayerInput {
   userId: string;

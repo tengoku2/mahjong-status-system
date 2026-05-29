@@ -3,6 +3,7 @@ import {
   SlashCommandBuilder,
   SlashCommandChannelOption,
   SlashCommandIntegerOption,
+  SlashCommandNumberOption,
   SlashCommandStringOption,
   SlashCommandSubcommandBuilder,
   SlashCommandUserOption
@@ -43,6 +44,22 @@ function addSeasonOption(command: SlashCommandSubcommandBuilder, required = fals
 function addSeasonYearOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addIntegerOption((option: SlashCommandIntegerOption) =>
     option.setName("season_year").setDescription("シーズン年。例: 26").setRequired(required).setMinValue(1).setMaxValue(99)
+  );
+}
+
+function addPointOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addNumberOption((option: SlashCommandNumberOption) =>
+    option.setName("point").setDescription("加点ポイント").setRequired(required)
+  );
+}
+
+function addBonusTargetOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option
+      .setName("target")
+      .setDescription("加点対象")
+      .setRequired(required)
+      .addChoices({ name: "役満ボーナス", value: "yakuman_bonus" })
   );
 }
 
@@ -197,6 +214,19 @@ export const mjsCommand = new SlashCommandBuilder()
   )
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))
+  )
+  .addSubcommand((command) =>
+    addSeasonYearOption(
+      addSeasonOption(
+        addPointOption(
+          addBonusTargetOption(
+            addTypeOption(addUserOption(command.setName("bonus").setDescription("シーズン加点を登録します"), true), true),
+            true
+          ),
+          true
+        )
+      )
+    )
   )
   .addSubcommand((command) =>
     addChannelOption(command.setName("season_lock").setDescription("シーズンロック中に運営が閲覧するチャンネルを設定します"), "channel", "運営閲覧チャンネル", true)

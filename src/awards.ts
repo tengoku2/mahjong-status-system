@@ -119,7 +119,8 @@ export function calculateSeasonAwards(
   results: RecordInput[],
   fourPlayerResultsOrMinGames: RecordInput[] | number = [],
   fourPlayerHands: HandRecordInput[] = [],
-  minGames = 5
+  minGames = 5,
+  mvpBonusByUser = new Map<string, number>()
 ): SeasonAwards {
   const fourPlayerResults = Array.isArray(fourPlayerResultsOrMinGames) ? fourPlayerResultsOrMinGames : results;
   minGames = typeof fourPlayerResultsOrMinGames === "number" ? fourPlayerResultsOrMinGames : minGames;
@@ -176,7 +177,7 @@ export function calculateSeasonAwards(
   const averageRankByUser = new Map(
     eligibleUsers.map((userId) => [userId, (rankSumByUser.get(userId) ?? 0) / (gamesByUser.get(userId) ?? 1)])
   );
-  const mvpCandidates = eligibleUsers.map((userId) => ({ userId, value: pointByUser.get(userId) ?? 0 }));
+  const mvpCandidates = eligibleUsers.map((userId) => ({ userId, value: (pointByUser.get(userId) ?? 0) + (mvpBonusByUser.get(userId) ?? 0) }));
   const rawMvp = selectHighest(mvpCandidates);
   const resolvedMvpIds = resolveMvpTie(eligibleResults, rawMvp.map((entry) => entry.userId), averageRankByUser);
   const mvp = rawMvp.filter((entry) => resolvedMvpIds.includes(entry.userId));

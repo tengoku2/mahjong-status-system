@@ -948,18 +948,24 @@ function nanikiruDescription(question: NanikiruQuestion, context: NanikiruContex
   return lines.join("\n");
 }
 
-function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number, note?: string | null) {
+function nanikiruAnswerStatus(answerNames: string[]): string {
+  const answerers = answerNames.length ? answerNames.join(", ") : "なし";
+  const text = `回答数: ${answerNames.length} / 回答者: ${answerers}`;
+  return text.length <= 1600 ? text : `${text.slice(0, 1597)}...`;
+}
+
+function nanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerNames: string[], note?: string | null) {
   return new EmbedBuilder()
     .setTitle("平面何切る")
     .setDescription(nanikiruDescription(question, context, note))
-    .setFooter({ text: `回答数: ${answerCount} / 回答すると自分だけに現在の回答分布が表示されます。24時間後に締め切ります。` });
+    .setFooter({ text: `${nanikiruAnswerStatus(answerNames)} / 回答すると自分だけに現在の回答分布が表示されます。24時間後に締め切ります。` });
 }
 
-function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerCount: number, note?: string | null) {
+function closedNanikiruEmbed(question: NanikiruQuestion, context: NanikiruContext, answerNames: string[], note?: string | null) {
   return new EmbedBuilder()
     .setTitle("平面何切る（締切済み）")
     .setDescription(nanikiruDescription(question, context, note))
-    .setFooter({ text: `回答数: ${answerCount} / この問題の回答受付は終了しました。` });
+    .setFooter({ text: `${nanikiruAnswerStatus(answerNames)} / この問題の回答受付は終了しました。` });
 }
 
 function nanikiruAnswerRow(questionId: string, hand: Tile[]) {
@@ -999,6 +1005,11 @@ async function nanikiruDistributionWithNames(guildId: string, answers: Array<{ u
     .sort(([leftTile, leftNames], [rightTile, rightNames]) => rightNames.length - leftNames.length || leftTile - rightTile)
     .map(([tile, names]) => `${tileLabel(tile)} ${names.length}票: ${names.join(", ")}`)
     .join("\n");
+}
+
+async function nanikiruAnswerNames(guildId: string, answers: Array<{ userId: string }>): Promise<string[]> {
+  const uniqueUserIds = [...new Set(answers.map((answer) => answer.userId))];
+  return Promise.all(uniqueUserIds.map((userId) => displayNameForUserId(guildId, userId)));
 }
 
 async function displayNameForUserId(guildId: string, userId: string): Promise<string> {
@@ -1186,10 +1197,11 @@ async function closeNanikiruQuestion(questionId: string) {
 
   const question = storedQuestion(problem);
   const context = storedContext(problem);
+  const answerNames = await nanikiruAnswerNames(problem.guildId, problem.answers);
   const messageChannel = await resolveSendableChannel(problem.questionChannelId);
   const message = await messageChannel?.messages.fetch(problem.messageId).catch(() => null);
   await message?.edit({
-    embeds: [closedNanikiruEmbed(question, context, problem.answers.length, problem.note)],
+    embeds: [closedNanikiruEmbed(question, context, answerNames, problem.note)],
     components: []
   }).catch(() => undefined);
 
@@ -1225,7 +1237,7 @@ async function handleNanikiruCommand(interaction: ChatInputCommandInteraction) {
   const questionId = randomUUID();
   const closesAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const message = await targetChannel.send({
-    embeds: [nanikiruEmbed(question, context, 0, note)],
+    embeds: [nanikiruEmbed(question, context, [], note)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   });
 
@@ -1355,8 +1367,9 @@ async function handleNanikiruAnswer(interaction: StringSelectMenuInteraction) {
   const answers = await prisma.nanikiruAnswer.findMany({
     where: { questionId }
   });
+  const answerNames = await nanikiruAnswerNames(problem.guildId, answers);
   await interaction.message.edit({
-    embeds: [nanikiruEmbed(question, context, answers.length, problem.note)],
+    embeds: [nanikiruEmbed(question, context, answerNames, problem.note)],
     components: [nanikiruAnswerRow(questionId, question.hand)]
   }).catch((error) => console.error(error));
 

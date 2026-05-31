@@ -707,6 +707,12 @@ ${matchText(record.playedAt)}` ,
     empty,
     "\u540d"
   );
+  const bestLastAvoidanceRate = await summarizeRecordList<PlayerRecord>(
+    currentRecords.bestLastAvoidanceRate,
+    async (record) => `${await nameFor(record.userId)} ${record.value.toFixed(1)}%`,
+    `${currentRecords.qualifiedMinGames}戦以上の記録なし`,
+    "\u540d"
+  );
   const lowestDealInRate =
     type === "4p"
       ? await summarizeRecordList<PlayerRecord>(
@@ -747,6 +753,7 @@ ${matchText(record.playedAt)}` ,
         .addFields(
           { name: "\u6700\u9ad8\u30b9\u30b3\u30a2", value: highestRawScore, inline: false },
           { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: false },
+          { name: "\u30e9\u30b9\u56de\u907f\u7387\u9996\u4f4d", value: bestLastAvoidanceRate, inline: false },
           { name: "\u653e\u9283\u7387\u6700\u5c0f", value: lowestDealInRate, inline: false },
           { name: "\u548c\u4e86\u7387\u9996\u4f4d", value: highestWinRate, inline: false },
           { name: "\u6700\u591a\u5f79\u6e80", value: mostYakuman, inline: false }
@@ -784,10 +791,25 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
     async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(1)}%`,
     `4人半荘${awards.minGames}戦以上の記録なし`
   );
+  const lastAvoidanceRatePrize = await summarizeAwardList(
+    awards.lastAvoidanceRatePrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(1)}%`,
+    `${awards.minGames}戦以上の記録なし`
+  );
   const mostYakumanPrize = await summarizeAwardList(
     awards.mostYakumanPrize,
     async (entry) => `${await nameFor(entry.userId)} ${entry.value}回`,
     `4人半荘${awards.minGames}戦以上の記録なし`
+  );
+  const highestScorePrize = await summarizeAwardList(
+    awards.highestScorePrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}点`,
+    `${awards.minGames}戦以上の記録なし`
+  );
+  const participationPrize = await summarizeAwardList(
+    awards.participationPrize,
+    async (entry) => `${await nameFor(entry.userId)} ${entry.value}戦`,
+    `${awards.minGames}戦以上の記録なし`
   );
 
   await interaction.editReply({
@@ -797,6 +819,9 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
         .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 放銃率・役満は4人半荘のみ / 参加条件: ${awards.minGames}戦以上`)
         .addFields(
           { name: "MVP", value: mvp, inline: false },
+          { name: "最多対局賞", value: participationPrize, inline: true },
+          { name: "ラス回避率賞", value: lastAvoidanceRatePrize, inline: true },
+          { name: "最高スコア賞", value: highestScorePrize, inline: true },
           { name: "最低放銃率賞", value: lowestDealInRatePrize, inline: true },
           { name: "最多役満賞", value: mostYakumanPrize, inline: true }
         )

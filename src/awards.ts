@@ -9,6 +9,7 @@ export interface SeasonAwards {
   minGames: number;
   eligibleGames: Map<string, number>;
   mvp: AwardSummary[];
+  lastAvoidanceRatePrize: AwardSummary[];
   topPrize: AwardSummary[];
   stabilityPrize: AwardSummary[];
   highestScorePrize: AwardSummary[];
@@ -230,6 +231,12 @@ export function calculateSeasonAwards(
     minGames,
     eligibleGames,
     mvp,
+    lastAvoidanceRatePrize: selectHighest(
+      eligibleUsers.map((userId) => ({
+        userId,
+        value: ((gamesByUser.get(userId) ?? 0) - (sortedByUser.get(userId)?.filter((entry) => entry.rank === (maxRankByMatch.get(entry.match.matchId) ?? entry.rank)).length ?? 0)) / (gamesByUser.get(userId) ?? 1) * 100
+      }))
+    ),
     topPrize: selectHighest(eligibleUsers.map((userId) => ({ userId, value: topsByUser.get(userId) ?? 0 }))),
     stabilityPrize: selectLowest(
       eligibleUsers.map((userId) => ({

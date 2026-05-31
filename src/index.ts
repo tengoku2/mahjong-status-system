@@ -737,7 +737,7 @@ ${matchText(record.playedAt)}` ,
   await interaction.editReply({
     embeds: [
       new EmbedBuilder()
-        .setTitle(`${typeLabel(type)} \u30ec\u30b3\u30fc\u30c9`)
+        .setTitle(`${typeLabel(type)} 期間内ベスト`)
         .setDescription(
           `\u7a2e\u5225: ${typeLabel(type)} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
             tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
@@ -747,8 +747,8 @@ ${matchText(record.playedAt)}` ,
         .addFields(
           { name: "\u6700\u9ad8\u30b9\u30b3\u30a2", value: highestRawScore, inline: false },
           { name: "\u6700\u591a\u30c8\u30c3\u30d7", value: mostTops, inline: false },
-          { name: "\u6700\u4f4e\u653e\u9283\u7387", value: lowestDealInRate, inline: false },
-          { name: "\u6700\u9ad8\u548c\u4e86\u7387", value: highestWinRate, inline: false },
+          { name: "\u653e\u9283\u7387\u6700\u5c0f", value: lowestDealInRate, inline: false },
+          { name: "\u548c\u4e86\u7387\u9996\u4f4d", value: highestWinRate, inline: false },
           { name: "\u6700\u591a\u5f79\u6e80", value: mostYakuman, inline: false }
         )
     ]
@@ -779,36 +779,6 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
     async (entry) => `${await nameFor(entry.userId)} ${formatPoint(entry.value)}pt`,
     `${awards.minGames}戦以上の記録なし`
   );
-  const topPrize = await summarizeAwardList(
-    awards.topPrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value}回`,
-    `${awards.minGames}戦以上の記録なし`
-  );
-  const stabilityPrize = await summarizeAwardList(
-    awards.stabilityPrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(2)}位`,
-    `${awards.minGames}戦以上の記録なし`
-  );
-  const highestScorePrize = await summarizeAwardList(
-    awards.highestScorePrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value}点`,
-    `${awards.minGames}戦以上の記録なし`
-  );
-  const topStreakPrize = await summarizeAwardList(
-    awards.topStreakPrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value}連続`,
-    "2連続以上の記録なし"
-  );
-  const noLastStreakPrize = await summarizeAwardList(
-    awards.noLastStreakPrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value}連続`,
-    "2連続以上の記録なし"
-  );
-  const participationPrize = await summarizeAwardList(
-    awards.participationPrize,
-    async (entry) => `${await nameFor(entry.userId)} ${entry.value}戦`,
-    `${awards.minGames}戦以上の記録なし`
-  );
   const lowestDealInRatePrize = await summarizeAwardList(
     awards.lowestDealInRatePrize,
     async (entry) => `${await nameFor(entry.userId)} ${entry.value.toFixed(1)}%`,
@@ -824,15 +794,9 @@ async function handleAwards(interaction: ChatInputCommandInteraction) {
     embeds: [
       new EmbedBuilder()
         .setTitle(`白鳳会 シーズン表彰 ${formatSeasonLabel(season)}`)
-        .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 参加条件: ${awards.minGames}戦以上 / 放銃率・役満は4人半荘のみ`)
+        .setDescription(`対象: 3人半荘・4人半荘の常設戦 / 放銃率・役満は4人半荘のみ / 参加条件: ${awards.minGames}戦以上`)
         .addFields(
           { name: "MVP", value: mvp, inline: false },
-          { name: "トップ賞", value: topPrize, inline: true },
-          { name: "安定賞", value: stabilityPrize, inline: true },
-          { name: "最高スコア賞", value: highestScorePrize, inline: true },
-          { name: "連続トップ賞", value: topStreakPrize, inline: true },
-          { name: "連続ラス回避賞", value: noLastStreakPrize, inline: true },
-          { name: "最多対局賞", value: participationPrize, inline: true },
           { name: "最低放銃率賞", value: lowestDealInRatePrize, inline: true },
           { name: "最多役満賞", value: mostYakumanPrize, inline: true }
         )
@@ -1531,8 +1495,8 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs add` 対局結果を登録",
     "`/mjs stats` 成績を表示",
     "`/mjs rank` ランキングを表示",
-    "`/mjs best` レコードを表示",
-    "`/mjs awards` シーズン表彰を表示",
+    "`/mjs best` 期間内ベストを表示",
+    "`/mjs awards` 公式シーズン表彰を表示",
     "`/mjs export` CSVを出力",
     "`/mjs bonus` 管理者向け。シーズン加点を登録",
     "`/mjs season_lock` ロック中の運営閲覧チャンネルを設定",

@@ -207,10 +207,10 @@ export const mjsCommand = new SlashCommandBuilder()
     addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("レコードを表示します"))))))
+    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("期間内ベストを表示します"))))))
   )
   .addSubcommand((command) =>
-    addSeasonYearOption(addSeasonOption(command.setName("awards").setDescription("シーズン表彰を表示します")))
+    addSeasonYearOption(addSeasonOption(command.setName("awards").setDescription("公式シーズン表彰を表示します")))
   )
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("export").setDescription("CSVをエクスポートします")))

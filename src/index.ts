@@ -19,6 +19,7 @@ import {
 } from "discord.js";
 import { createApiServer } from "./external-api.js";
 import { buildSeasonExportBundle, csvAttachment } from "./export.js";
+import { guildRulesFor } from "./guild-rules.js";
 import type { AwardSummary } from "./awards.js";
 import { displayName, formatPercent, formatPoint } from "./display.js";
 import { recordModal } from "./modals.js";
@@ -327,6 +328,9 @@ async function ensureSeasonLockAccess(
   }
 ): Promise<boolean> {
   const guildId = requireGuildId(interaction);
+  if (!guildRulesFor(guildId).useSeasonLock) {
+    return true;
+  }
   const setting = await getSeasonLockSetting(guildId);
   const lockState = options.season
     ? lockStateForSeason(options.season, setting)
@@ -582,25 +586,29 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
 async function handleRanking(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
-  const type = optionalTypeOption(interaction);
-  const rankingTypes: MahjongType[] = type ? [type] : ["3p", "4p"];
-  const rankingLabel = type ? typeLabel(type) : "MVP";
-  const rankingScope = type ? `\u7a2e\u5225: ${typeLabel(type)}` : "\u5bfe\u8c61: 3\u4eba\u534a\u8358 + 4\u4eba\u534a\u8358";
+  const rules = guildRulesFor(guildId);
+  const requestedType = optionalTypeOption(interaction);
+  const type = requestedType ?? (rules.useMvpRanking ? undefined : rules.defaultRankType);
+  const isMvpRanking = !type && rules.useMvpRanking;
+  const rankingTypes: MahjongType[] = isMvpRanking ? rules.mvpTypes : [type ?? rules.defaultRankType];
+  const rankingLabel = isMvpRanking ? "MVP" : typeLabel(rankingTypes[0]);
+  const rankingScope = isMvpRanking ? "\u5bfe\u8c61: 3\u4eba\u534a\u8358 + 4\u4eba\u534a\u8358" : `\u7a2e\u5225: ${typeLabel(rankingTypes[0])}`;
   const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
   if (!(await ensureSeasonLockAccess(interaction, "ranking", { season, period }))) {
     return;
   }
   const showMovement = Boolean(season && isCurrentSeasonWindow(season));
-  const showMvpPenalty = !type && (season ? isCurrentSeasonWindow(season) : true);
-  const bonusByUser = season ? buildSeasonBonusMap(await getSeasonBonuses(guildId, season, rankingTypes)) : new Map<string, number>();
+  const showMvpPenalty = isMvpRanking && rules.useSeasonPenalty && (season ? isCurrentSeasonWindow(season) : true);
+  const bonusByUser =
+    season && rules.useSeasonBonus ? buildSeasonBonusMap(await getSeasonBonuses(guildId, season, rankingTypes)) : new Map<string, number>();
   let computedRankingData: {
     current: Array<RankingEntry | MvpRankingEntry>;
     previous: Array<RankingEntry | MvpRankingEntry>;
     latestMatchId: string | null;
   };
 
-  if (!type && season) {
+  if (isMvpRanking && season) {
     const resultSet = showMovement
       ? await resultsWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
       : {
@@ -765,6 +773,10 @@ ${matchText(record.playedAt)}` ,
 async function handleAwards(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
   const guildId = requireGuildId(interaction);
+  if (!guildRulesFor(guildId).awardsEnabled) {
+    await interaction.editReply("このサーバーでは `/mjs awards` は使用しません。期間内ベストは `/mjs best` で確認してください。");
+    return;
+  }
   const season = resolveSeasonOption(interaction);
   if (!(await ensureSeasonLockAccess(interaction, "full_lock", { season }))) {
     return;
@@ -854,6 +866,10 @@ async function handleSeasonLock(interaction: ChatInputCommandInteraction) {
     await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
     return;
   }
+  if (!guildRulesFor(guildId).useSeasonLock) {
+    await interaction.editReply("このサーバーではシーズンロックを使用しません。");
+    return;
+  }
 
   const channel = interaction.options.getChannel("channel", true);
   await prisma.seasonLockSetting.upsert({
@@ -875,6 +891,10 @@ async function handleSeasonUnlock(interaction: ChatInputCommandInteraction) {
   const guildId = requireGuildId(interaction);
   if (!hasManagerAccess(interaction)) {
     await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
+    return;
+  }
+  if (!guildRulesFor(guildId).useSeasonLock) {
+    await interaction.editReply("このサーバーではシーズンロックを使用しません。");
     return;
   }
 
@@ -907,6 +927,10 @@ async function handleSeasonBonus(interaction: ChatInputCommandInteraction) {
   const guildId = requireGuildId(interaction);
   if (!hasManagerAccess(interaction)) {
     await interaction.editReply("このコマンドはサーバー管理者または開発者のみ使用できます。");
+    return;
+  }
+  if (!guildRulesFor(guildId).useSeasonBonus) {
+    await interaction.editReply("このサーバーではシーズン加点を使用しません。");
     return;
   }
 
@@ -1515,17 +1539,15 @@ async function handleMembers(interaction: ChatInputCommandInteraction) {
 
 async function handleHelp(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  const rules = guildRulesFor(guildId);
   const canUseName = canManageNames(interaction);
   const lines = [
     "`/mjs add` 対局結果を登録",
     "`/mjs stats` 成績を表示",
     "`/mjs rank` ランキングを表示",
     "`/mjs best` 期間内ベストを表示",
-    "`/mjs awards` 公式シーズン表彰を表示",
     "`/mjs export` CSVを出力",
-    "`/mjs bonus` 管理者向け。シーズン加点を登録",
-    "`/mjs season_lock` ロック中の運営閲覧チャンネルを設定",
-    "`/mjs season_unlock` 直前シーズンのロックを解除",
     "`/mjs nanikiru` 何切る問題を出題",
     "`/mjs nanikiru_config` 何切るの投稿先を設定",
     "`/mjs log` ユーザー別の対局履歴を表示",
@@ -1535,6 +1557,16 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs members` VRC名の登録一覧を表示",
     "`/mjs help` このヘルプを表示"
   ];
+
+  if (rules.awardsEnabled) {
+    lines.splice(4, 0, "`/mjs awards` 公式シーズン表彰を表示");
+  }
+  if (rules.useSeasonBonus) {
+    lines.splice(6, 0, "`/mjs bonus` 管理者向け。シーズン加点を登録");
+  }
+  if (rules.useSeasonLock) {
+    lines.splice(7, 0, "`/mjs season_lock` ロック中の運営閲覧チャンネルを設定", "`/mjs season_unlock` 直前シーズンのロックを解除");
+  }
 
   if (canUseName) {
     lines.splice(12, 0, "`/mjs name` DiscordユーザーとVRC名を紐づけ");

@@ -11,6 +11,8 @@ export interface GuildRules {
   useSeasonPenalty: boolean;
   useSeasonLock: boolean;
   useSeasonBonus: boolean;
+  useSeasonWindows: boolean;
+  defaultLeaderboardPeriod: "current_season" | "all";
   awardsEnabled: boolean;
 }
 
@@ -26,6 +28,8 @@ const standardRules: GuildRules = {
   useSeasonPenalty: false,
   useSeasonLock: false,
   useSeasonBonus: false,
+  useSeasonWindows: false,
+  defaultLeaderboardPeriod: "all",
   awardsEnabled: false
 };
 
@@ -38,6 +42,8 @@ const hakuhokaiRules: GuildRules = {
   useSeasonPenalty: true,
   useSeasonLock: true,
   useSeasonBonus: true,
+  useSeasonWindows: true,
+  defaultLeaderboardPeriod: "current_season",
   awardsEnabled: true
 };
 

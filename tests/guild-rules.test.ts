@@ -10,6 +10,8 @@ describe("guild rules", () => {
     expect(rules.useSeasonPenalty).toBe(true);
     expect(rules.useSeasonLock).toBe(true);
     expect(rules.useSeasonBonus).toBe(true);
+    expect(rules.useSeasonWindows).toBe(true);
+    expect(rules.defaultLeaderboardPeriod).toBe("current_season");
     expect(rules.awardsEnabled).toBe(true);
   });
 
@@ -23,6 +25,8 @@ describe("guild rules", () => {
       expect(rules.useSeasonPenalty).toBe(false);
       expect(rules.useSeasonLock).toBe(false);
       expect(rules.useSeasonBonus).toBe(false);
+      expect(rules.useSeasonWindows).toBe(false);
+      expect(rules.defaultLeaderboardPeriod).toBe("all");
       expect(rules.awardsEnabled).toBe(false);
     }
   });

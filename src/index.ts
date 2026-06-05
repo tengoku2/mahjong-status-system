@@ -101,7 +101,13 @@ function optionalTypeOption(interaction: ChatInputCommandInteraction): MahjongTy
 }
 
 function periodOption(interaction: ChatInputCommandInteraction): Period {
-  return (interaction.options.getString("period") ?? "all") as Period;
+  const guildId = requireGuildId(interaction);
+  const rules = guildRulesFor(guildId);
+  const period = (interaction.options.getString("period") ?? "all") as Period;
+  if (!rules.useSeasonWindows && (period === "current_season" || period === "previous_season")) {
+    return "all";
+  }
+  return period;
 }
 
 function rankingPeriodOption(interaction: ChatInputCommandInteraction): Period {
@@ -127,8 +133,23 @@ function resolveSeasonOption(interaction: ChatInputCommandInteraction) {
 }
 
 function resolveLeaderboardWindow(interaction: ChatInputCommandInteraction) {
+  const guildId = requireGuildId(interaction);
+  const rules = guildRulesFor(guildId);
   const seasonRequested = Boolean(seasonCodeOption(interaction) || interaction.options.getInteger("season_year"));
   const rawPeriod = interaction.options.getString("period");
+  if (!rules.useSeasonWindows) {
+    const period = rawPeriod as Period | null;
+    if (period && period !== "current_season" && period !== "previous_season") {
+      return {
+        season: null,
+        period
+      };
+    }
+    return {
+      season: null,
+      period: "all" as Period
+    };
+  }
   if (seasonRequested && rawPeriod) {
     throw new Error("season 指定時は period を同時に指定できません。");
   }
@@ -158,8 +179,8 @@ function resolveLeaderboardWindow(interaction: ChatInputCommandInteraction) {
     };
   }
   return {
-    season: currentSeason(),
-    period: null
+    season: rules.defaultLeaderboardPeriod === "current_season" ? currentSeason() : null,
+    period: rules.defaultLeaderboardPeriod === "all" ? ("all" as Period) : null
   };
 }
 

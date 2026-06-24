@@ -1,3 +1,4 @@
+import { TieBreakType, type RuleSet } from "@prisma/client";
 import type { CalculatedResult, MahjongType, PlayerInput } from "./types.js";
 
 const rules = {
@@ -72,10 +73,54 @@ export function calculateResults(type: MahjongType | string, players: PlayerInpu
   }));
 }
 
+export function calculateResultsWithRuleSet(ruleSet: Pick<RuleSet, "returnScore" | "tieBreakType" | "uma">, players: PlayerInput[]): CalculatedResult[] {
+  const uma = parseUma(ruleSet.uma);
+  const tiedRanksByRawScore = new Map<number, number[]>();
+
+  if (ruleSet.tieBreakType === TieBreakType.SPLIT_UMA) {
+    for (const player of players) {
+      const ranks = tiedRanksByRawScore.get(player.rawScore) ?? [];
+      ranks.push(player.rank);
+      tiedRanksByRawScore.set(player.rawScore, ranks);
+    }
+  }
+
+  return players.map((player) => {
+    const rankUma =
+      ruleSet.tieBreakType === TieBreakType.SPLIT_UMA
+        ? averageUmaForRanks(uma, tiedRanksByRawScore.get(player.rawScore) ?? [player.rank])
+        : umaForRank(uma, player.rank);
+
+    return {
+      ...player,
+      point: (player.rawScore - ruleSet.returnScore) / 1000 + rankUma
+    };
+  });
+}
+
 export function expectedPlayerCount(type: MahjongType | string): number {
   return normalizeMahjongType(type).startsWith("4p") ? 4 : 3;
 }
 
 export function isEastGame(type: MahjongType | string): boolean {
   return normalizeMahjongType(type).endsWith("_east");
+}
+
+function parseUma(value: unknown): number[] {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "number")) {
+    throw new Error("RuleSetのウマ設定が不正です。");
+  }
+  return value;
+}
+
+function umaForRank(uma: number[], rank: number): number {
+  const value = uma[rank - 1];
+  if (value === undefined) {
+    throw new Error(`RuleSet does not allow rank ${rank}`);
+  }
+  return value;
+}
+
+function averageUmaForRanks(uma: number[], ranks: number[]): number {
+  return ranks.reduce((total, rank) => total + umaForRank(uma, rank), 0) / ranks.length;
 }

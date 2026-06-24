@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { calculatePoint, calculateResults, expectedPlayerCount, isEastGame, normalizeMahjongType } from "../src/scoring.js";
+import { TieBreakType } from "@prisma/client";
+import { calculatePoint, calculateResults, calculateResultsWithRuleSet, expectedPlayerCount, isEastGame, normalizeMahjongType } from "../src/scoring.js";
 
 describe("scoring", () => {
   it("calculates 4p points with uma", () => {
@@ -40,6 +41,50 @@ describe("scoring", () => {
       { userId: "1", rank: 1, rawScore: 50000, point: 20 },
       { userId: "2", rank: 2, rawScore: 35000, point: 0 },
       { userId: "3", rank: 3, rawScore: 20000, point: -35 }
+    ]);
+  });
+
+  it("calculates points from a RuleSet for mjs v2 registrations", () => {
+    expect(
+      calculateResultsWithRuleSet(
+        {
+          returnScore: 35000,
+          uma: [15, 0, -15],
+          tieBreakType: TieBreakType.SEAT_ORDER
+        },
+        [
+          { userId: "1", rank: 1, rawScore: 50000 },
+          { userId: "2", rank: 2, rawScore: 35000 },
+          { userId: "3", rank: 3, rawScore: 20000 }
+        ]
+      )
+    ).toEqual([
+      { userId: "1", rank: 1, rawScore: 50000, point: 30 },
+      { userId: "2", rank: 2, rawScore: 35000, point: 0 },
+      { userId: "3", rank: 3, rawScore: 20000, point: -30 }
+    ]);
+  });
+
+  it("splits uma for tied raw scores when the RuleSet requires it", () => {
+    expect(
+      calculateResultsWithRuleSet(
+        {
+          returnScore: 30000,
+          uma: [50, 10, -10, -30],
+          tieBreakType: TieBreakType.SPLIT_UMA
+        },
+        [
+          { userId: "1", rank: 1, rawScore: 35000 },
+          { userId: "2", rank: 2, rawScore: 35000 },
+          { userId: "3", rank: 3, rawScore: 20000 },
+          { userId: "4", rank: 4, rawScore: 10000 }
+        ]
+      )
+    ).toEqual([
+      { userId: "1", rank: 1, rawScore: 35000, point: 35 },
+      { userId: "2", rank: 2, rawScore: 35000, point: 35 },
+      { userId: "3", rank: 3, rawScore: 20000, point: -20 },
+      { userId: "4", rank: 4, rawScore: 10000, point: -50 }
     ]);
   });
 

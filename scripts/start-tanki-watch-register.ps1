@@ -1,6 +1,7 @@
 param(
   [string]$GuildId = "1499090620373929984",
   [string]$ApiUrl = "https://mjs-tengoku2-a8a007d5.koyeb.app/api/matches",
+  [string]$EventName,
   [string]$LogPath
 )
 
@@ -30,6 +31,14 @@ $env:TANKI_LOCAL_ONLY = "false"
 $env:TANKI_ALLOW_PLACEHOLDER_PLAYERS = "false"
 $env:TANKI_READ_EXISTING = "false"
 $env:TANKI_AUTO_FOLLOW_LATEST_LOG = "true"
+
+if ($EventName) {
+  $env:TANKI_EVENT_NAME = $EventName
+  Write-Host "Event: $EventName"
+} else {
+  Remove-Item Env:TANKI_EVENT_NAME -ErrorAction SilentlyContinue
+  Write-Host "Event: default normal event"
+}
 
 if ($LogPath) {
   $env:TANKI_LOG_PATH = $LogPath

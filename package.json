@@ -15,6 +15,7 @@
     "tanki:watch": "tsx scripts/watch-vrchat-tanki-log.ts",
     "db:deploy": "prisma migrate deploy",
     "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
+    "rules:seed": "tsx scripts/seed-rule-sets.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

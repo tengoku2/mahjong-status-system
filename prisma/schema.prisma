@@ -8,15 +8,18 @@ datasource db {
 }
 
 model Guild {
-  guildId          String                 @id @map("guild_id")
-  users            User[]
-  profiles         UserProfile[]
-  matches          Match[]
-  seasonBonuses    SeasonBonus[]
+  guildId           String                @id @map("guild_id")
+  users             User[]
+  profiles          UserProfile[]
+  matches           Match[]
+  ruleSets          RuleSet[]
+  events            Event[]
+  adjustments       Adjustment[]
+  seasonBonuses     SeasonBonus[]
   seasonLockSetting SeasonLockSetting?
-  nanikiruSetting  NanikiruGuildSetting?
-  nanikiruProblems NanikiruProblem[]
-  createdAt        DateTime               @default(now()) @map("created_at")
+  nanikiruSetting   NanikiruGuildSetting?
+  nanikiruProblems  NanikiruProblem[]
+  createdAt         DateTime              @default(now()) @map("created_at")
 
   @@map("guilds")
 }
@@ -43,19 +46,29 @@ model UserProfile {
 }
 
 model Match {
-  matchId        String   @id @default(cuid()) @map("match_id")
-  guildId        String   @map("guild_id")
+  matchId        String         @id @default(cuid()) @map("match_id")
+  guildId        String         @map("guild_id")
   type           String
-  tournamentName String?  @map("tournament_name")
-  playedAt       DateTime @default(now()) @map("played_at")
-  createdAt      DateTime @default(now()) @map("created_at")
-  guild          Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  gameType       GameType?      @map("game_type")
+  eventId        String?        @map("event_id")
+  ruleSetId      String?        @map("rule_set_id")
+  tournamentName String?        @map("tournament_name")
+  playedAt       DateTime       @default(now()) @map("played_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  aborted        Boolean        @default(false)
+  abortReason    String?        @map("abort_reason")
+  guild          Guild          @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  event          Event?         @relation(fields: [eventId], references: [eventId], onDelete: SetNull)
+  ruleSet        RuleSet?       @relation(fields: [ruleSetId], references: [ruleSetId], onDelete: SetNull)
   results        Result[]
   externalMatch  ExternalMatch?
   hands          Hand[]
 
   @@index([guildId, type, playedAt])
   @@index([guildId, type, tournamentName, playedAt])
+  @@index([guildId, gameType, playedAt])
+  @@index([guildId, eventId, gameType, playedAt])
+  @@index([guildId, ruleSetId, playedAt])
   @@map("matches")
 }
 
@@ -63,6 +76,7 @@ model Result {
   resultId String @id @default(cuid()) @map("result_id")
   matchId  String @map("match_id")
   userId   String @map("user_id")
+  seat     Int?
   rank     Int
   rawScore Int    @map("raw_score")
   point    Float
@@ -72,6 +86,104 @@ model Result {
   @@unique([matchId, rank])
   @@index([userId])
   @@map("results")
+}
+
+enum GameType {
+  FOUR_PLAYER_HANCHAN  @map("4p_hanchan")
+  THREE_PLAYER_HANCHAN @map("3p_hanchan")
+  FOUR_PLAYER_TONPU    @map("4p_tonpu")
+  THREE_PLAYER_TONPU   @map("3p_tonpu")
+}
+
+enum EventKind {
+  NORMAL
+  TOURNAMENT
+  LEAGUE
+  TEST
+}
+
+enum EventStatus {
+  ACTIVE
+  CLOSED
+  ARCHIVED
+}
+
+enum TieBreakType {
+  SEAT_ORDER
+  SPLIT_UMA
+}
+
+enum RoundExtension {
+  NONE
+  SOUTH
+  WEST
+}
+
+model RuleSet {
+  ruleSetId      String         @id @default(cuid()) @map("rule_set_id")
+  guildId        String         @map("guild_id")
+  name           String
+  gameType       GameType       @map("game_type")
+  startScore     Int            @map("start_score")
+  returnScore    Int            @map("return_score")
+  uma            Json
+  allowBust      Boolean        @map("allow_bust")
+  bustThreshold  Int?           @map("bust_threshold")
+  allowAgariYame Boolean        @map("allow_agari_yame")
+  roundExtension RoundExtension @map("round_extension")
+  tieBreakType   TieBreakType   @map("tie_break_type")
+  isActive       Boolean        @default(true) @map("is_active")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  guild          Guild          @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  events         Event[]
+  matches        Match[]
+
+  @@unique([guildId, name])
+  @@index([guildId, gameType, isActive])
+  @@map("rule_sets")
+}
+
+model Event {
+  eventId     String       @id @default(cuid()) @map("event_id")
+  guildId     String       @map("guild_id")
+  ruleSetId   String       @map("rule_set_id")
+  name        String
+  kind        EventKind
+  status      EventStatus  @default(ACTIVE)
+  startsAt    DateTime?    @map("starts_at")
+  endsAt      DateTime?    @map("ends_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  guild       Guild        @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  ruleSet     RuleSet      @relation(fields: [ruleSetId], references: [ruleSetId], onDelete: Restrict)
+  matches     Match[]
+  adjustments Adjustment[]
+
+  @@unique([guildId, name])
+  @@index([guildId, kind, status])
+  @@index([guildId, ruleSetId])
+  @@map("events")
+}
+
+model Adjustment {
+  adjustmentId String    @id @default(cuid()) @map("adjustment_id")
+  guildId      String    @map("guild_id")
+  eventId      String    @map("event_id")
+  userId       String    @map("user_id")
+  gameType     GameType  @map("game_type")
+  amount       Float
+  reason       String
+  createdBy    String    @map("created_by")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+  guild        Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  event        Event     @relation(fields: [eventId], references: [eventId], onDelete: Cascade)
+
+  @@index([guildId, eventId, gameType])
+  @@index([guildId, userId, gameType])
+  @@index([deletedAt])
+  @@map("adjustments")
 }
 
 model ExternalMatch {
@@ -95,18 +207,18 @@ enum HandEndType {
 }
 
 model Hand {
-  handId       String      @id @default(cuid()) @map("hand_id")
-  matchId      String      @map("match_id")
-  handIndex    Int         @map("hand_index")
-  roundWind    String      @map("round_wind")
-  roundNumber  Int         @map("round_number")
-  honba        Int         @default(0)
-  kyotaku      Int         @default(0)
-  dealerUserId String?     @map("dealer_user_id")
-  endType      HandEndType @map("end_type")
-  abortReason  String?     @map("abort_reason")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  match        Match       @relation(fields: [matchId], references: [matchId], onDelete: Cascade)
+  handId       String           @id @default(cuid()) @map("hand_id")
+  matchId      String           @map("match_id")
+  handIndex    Int              @map("hand_index")
+  roundWind    String           @map("round_wind")
+  roundNumber  Int              @map("round_number")
+  honba        Int              @default(0)
+  kyotaku      Int              @default(0)
+  dealerUserId String?          @map("dealer_user_id")
+  endType      HandEndType      @map("end_type")
+  abortReason  String?          @map("abort_reason")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  match        Match            @relation(fields: [matchId], references: [matchId], onDelete: Cascade)
   playerStats  HandPlayerStat[]
 
   @@unique([matchId, handIndex])
@@ -153,12 +265,12 @@ model NanikiruGuildSetting {
 }
 
 model SeasonLockSetting {
-  guildId             String   @id @map("guild_id")
-  adminChannelId      String?  @map("admin_channel_id")
-  unlockedSeasonCode  String?  @map("unlocked_season_code")
-  unlockedSeasonYear  Int?     @map("unlocked_season_year")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-  guild               Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  guildId            String   @id @map("guild_id")
+  adminChannelId     String?  @map("admin_channel_id")
+  unlockedSeasonCode String?  @map("unlocked_season_code")
+  unlockedSeasonYear Int?     @map("unlocked_season_year")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  guild              Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 
   @@map("season_lock_settings")
 }

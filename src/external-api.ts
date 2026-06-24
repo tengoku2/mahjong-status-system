@@ -1,9 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 import type { Client } from "discord.js";
+import { resolveEventForMatch } from "./events.js";
 import { prisma } from "./prisma.js";
 import { createExternalMatch } from "./services.js";
-import { calculateResults, normalizeMahjongType } from "./scoring.js";
+import { calculateResultsWithRuleSet, normalizeMahjongType } from "./scoring.js";
 import type { HandEndType, HandInput, HandPlayerStatInput, MahjongType, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 
@@ -15,6 +16,7 @@ interface ExternalMatchPayload {
   type?: unknown;
   playedAt?: unknown;
   tournamentName?: unknown;
+  eventName?: unknown;
   externalSource?: unknown;
   externalMatchId?: unknown;
   dryRun?: unknown;
@@ -504,6 +506,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   const externalSource = requireString(payload.externalSource, "externalSource");
   const externalMatchId = requireString(payload.externalMatchId, "externalMatchId");
   const tournamentName = typeof payload.tournamentName === "string" ? payload.tournamentName.trim() || undefined : undefined;
+  const eventName = typeof payload.eventName === "string" ? payload.eventName.trim() || undefined : undefined;
   const playedAt = parsePlayedAt(payload.playedAt);
   const dryRun = payload.dryRun === true;
 
@@ -521,6 +524,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   const hands = await resolveHandsByDisplayName(guildId, parsedHands);
   validatePlayers(type, players);
   await assertGuildMembers(client, guildId, players, hands);
+  const event = await resolveEventForMatch(guildId, type, eventName);
 
   if (dryRun) {
     const existing = await prisma.externalMatch.findUnique({
@@ -542,9 +546,11 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
       guildId,
       type,
       tournamentName,
+      eventName: event.name,
+      ruleSetName: event.ruleSet.name,
       playedAt,
       handCount: hands?.length ?? 0,
-      results: calculateResults(type, players).map((matchResult) => ({
+      results: calculateResultsWithRuleSet(event.ruleSet, players).map((matchResult) => ({
         userId: matchResult.userId,
         rank: matchResult.rank,
         rawScore: matchResult.rawScore,
@@ -564,7 +570,8 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
       externalSource,
       externalMatchId
     },
-    hands
+    hands,
+    eventName
   );
 
   sendJson(response, result.duplicate ? 200 : 201, {
@@ -574,6 +581,8 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
     guildId: result.match.guildId,
     type: result.match.type,
     tournamentName: result.match.tournamentName,
+    eventName: result.match.event?.name,
+    ruleSetName: result.match.ruleSet?.name,
     playedAt: result.match.playedAt,
     handCount: hands?.length ?? 0,
     results: result.match.results.map((matchResult) => ({

@@ -17,6 +17,20 @@ const typeChoices = [
   { name: "3人東風", value: "3p_east" }
 ] as const;
 
+const eventKindChoices = [
+  { name: "通常戦", value: "normal" },
+  { name: "大会", value: "tournament" },
+  { name: "リーグ", value: "league" },
+  { name: "テスト", value: "test" }
+] as const;
+
+const eventStatusChoices = [
+  { name: "有効", value: "active" },
+  { name: "終了", value: "closed" },
+  { name: "保管", value: "archived" },
+  { name: "すべて", value: "all" }
+] as const;
+
 function addUserOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addUserOption((option: SlashCommandUserOption) =>
     option.setName("user").setDescription("対象ユーザー").setRequired(required)
@@ -53,6 +67,24 @@ function addPointOption(command: SlashCommandSubcommandBuilder, required = false
   );
 }
 
+function addAdjustmentAmountOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addNumberOption((option: SlashCommandNumberOption) =>
+    option.setName("amount").setDescription("補正ポイント。減点はマイナスで入力").setRequired(required)
+  );
+}
+
+function addReasonOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("reason").setDescription("補正理由").setRequired(required).setMaxLength(200)
+  );
+}
+
+function addAdjustmentIdOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("adjustment_id").setDescription("削除する補正ID").setRequired(required)
+  );
+}
+
 function addBonusTargetOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addStringOption((option: SlashCommandStringOption) =>
     option
@@ -66,6 +98,42 @@ function addBonusTargetOption(command: SlashCommandSubcommandBuilder, required =
 function addTournamentOption(command: SlashCommandSubcommandBuilder, required = false) {
   return command.addStringOption((option: SlashCommandStringOption) =>
     option.setName("tournament_name").setDescription("大会名").setRequired(required).setMaxLength(100)
+  );
+}
+
+function addRecordEventOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("event").setDescription("Event名。未指定なら種別に対応する通常戦").setRequired(required).setMaxLength(100)
+  );
+}
+
+function addEventFilterOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("event").setDescription("Event名で絞り込み").setRequired(required).setMaxLength(100)
+  );
+}
+
+function addEventNameOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("name").setDescription("Event名").setRequired(required).setMaxLength(100)
+  );
+}
+
+function addRuleSetNameOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("rule_set").setDescription("RuleSet名。例: 大会4人半荘").setRequired(required).setMaxLength(100)
+  );
+}
+
+function addEventKindOption(command: SlashCommandSubcommandBuilder, required = true) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("kind").setDescription("Event種別").setRequired(required).addChoices(...eventKindChoices)
+  );
+}
+
+function addEventStatusOption(command: SlashCommandSubcommandBuilder, required = false) {
+  return command.addStringOption((option: SlashCommandStringOption) =>
+    option.setName("status").setDescription("表示するEvent状態").setRequired(required).addChoices(...eventStatusChoices)
   );
 }
 
@@ -192,22 +260,24 @@ export const mjsCommand = new SlashCommandBuilder()
   .setName("mjs")
   .setDescription("麻雀成績システム")
   .addSubcommand((command) =>
-    addTournamentOption(addRecordUserOptions(addDateOption(addTypeOption(command.setName("add").setDescription("対局結果を登録します"), true))))
+    addRecordEventOption(
+      addTournamentOption(addRecordUserOptions(addDateOption(addTypeOption(command.setName("add").setDescription("対局結果を登録します"), true))))
+    )
   )
   .addSubcommand((command) =>
-    addTournamentOption(addPeriodOption(addTypeOption(addUserOption(command.setName("stats").setDescription("成績を表示します")))))
+    addEventFilterOption(addTournamentOption(addPeriodOption(addTypeOption(addUserOption(command.setName("stats").setDescription("成績を表示します"))))))
   )
   .addSubcommand((command) =>
-    addTypeOption(addCountOption(addUserOption(command.setName("log").setDescription("ユーザー別の対局履歴を表示します"))))
+    addEventFilterOption(addTypeOption(addCountOption(addUserOption(command.setName("log").setDescription("ユーザー別の対局履歴を表示します")))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addTypeOption(addCountOption(command.setName("matches").setDescription("サーバー全体の対局一覧を表示します"), 25)))
+    addEventFilterOption(addTournamentOption(addTypeOption(addCountOption(command.setName("matches").setDescription("サーバー全体の対局一覧を表示します"), 25))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します"))))))
+    addEventFilterOption(addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("rank").setDescription("ランキングを表示します")))))))
   )
   .addSubcommand((command) =>
-    addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("期間内ベストを表示します"))))))
+    addEventFilterOption(addTournamentOption(addSeasonYearOption(addSeasonOption(addPeriodOption(addTypeOption(command.setName("best").setDescription("期間内ベストを表示します")))))))
   )
   .addSubcommand((command) =>
     addSeasonYearOption(addSeasonOption(command.setName("awards").setDescription("公式シーズン表彰を表示します")))
@@ -257,6 +327,35 @@ export const mjsCommand = new SlashCommandBuilder()
       )
   )
   .addSubcommand((command) => command.setName("members").setDescription("VRC名が登録されているメンバーを表示します"))
+  .addSubcommandGroup((group) =>
+    group
+      .setName("event")
+      .setDescription("mjs v2 Eventを管理します")
+      .addSubcommand((command) => addEventStatusOption(command.setName("list").setDescription("Event一覧を表示します")))
+      .addSubcommand((command) => command.setName("rules").setDescription("RuleSet一覧を表示します"))
+      .addSubcommand((command) =>
+        addRuleSetNameOption(addEventKindOption(addEventNameOption(command.setName("create").setDescription("Eventを作成します"))))
+      )
+      .addSubcommand((command) => addEventNameOption(command.setName("close").setDescription("Eventを終了します")))
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName("adjust")
+      .setDescription("Event別の補正点を管理します")
+      .addSubcommand((command) =>
+        addReasonOption(
+          addAdjustmentAmountOption(
+            addEventFilterOption(addTypeOption(addUserOption(command.setName("add").setDescription("補正点を追加します"), true), true), true),
+            true
+          ),
+          true
+        )
+      )
+      .addSubcommand((command) =>
+        addEventFilterOption(addCountOption(addUserOption(command.setName("list").setDescription("補正点一覧を表示します")), 50))
+      )
+      .addSubcommand((command) => addAdjustmentIdOption(command.setName("delete").setDescription("補正点を削除します")))
+  )
   .addSubcommand((command) => command.setName("help").setDescription("使えるコマンドを表示します"));
 
 export const commands = [mjsCommand.toJSON()];

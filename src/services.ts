@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { calculateSeasonAwards } from "./awards.js";
 import { calculateHandStats, type HandStatsSummary } from "./hand-stats.js";
-import { calculateResults, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
+import { defaultEventNameForMahjongType, gameTypeForMahjongType, resolveEventForMatch } from "./events.js";
+import { calculateResultsWithRuleSet, expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { calculateRecords } from "./records.js";
 import { seasonPenalty } from "./season-lock.js";
 import { periodDateRange, recentLimit, type SeasonWindow } from "./periods.js";
@@ -40,6 +41,22 @@ export interface SeasonBonusEntry {
   target: SeasonBonusTarget;
   point: number;
   createdAt: Date;
+}
+
+export interface AdjustmentEntry {
+  adjustmentId: string;
+  guildId: string;
+  eventId: string;
+  userId: string;
+  gameType: string;
+  amount: number;
+  reason: string;
+  createdBy: string;
+  createdAt: Date;
+  deletedAt: Date | null;
+  event: {
+    name: string;
+  };
 }
 
 export type AggregatedHandStats = HandStatsSummary;
@@ -139,16 +156,127 @@ export function applyBonusToRankingEntries<T extends RankingEntry>(entries: T[],
     .sort((a, b) => b.totalPoint - a.totalPoint || b.averagePoint - a.averagePoint || a.userId.localeCompare(b.userId));
 }
 
+export function applyAdjustmentsToRankingEntries<T extends RankingEntry>(entries: T[], adjustmentsByUser: Map<string, number>): T[] {
+  return applyBonusToRankingEntries(entries, adjustmentsByUser);
+}
+
+export function buildAdjustmentMap(adjustments: Array<{ userId: string; amount: number }>): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const adjustment of adjustments) {
+    map.set(adjustment.userId, (map.get(adjustment.userId) ?? 0) + adjustment.amount);
+  }
+  return map;
+}
+
+export async function createAdjustment(
+  guildId: string,
+  input: {
+    eventName: string;
+    type: MahjongType;
+    userId: string;
+    amount: number;
+    reason: string;
+    createdBy: string;
+  }
+) {
+  const normalizedType = normalizeMahjongType(input.type);
+  const event = await resolveEventForMatch(guildId, normalizedType, input.eventName);
+  const reason = input.reason.trim();
+  if (!reason) {
+    throw new Error("補正理由を入力してください。");
+  }
+
+  await ensureGuildAndUsers(guildId, [input.userId]);
+  return prisma.adjustment.create({
+    data: {
+      guildId,
+      eventId: event.eventId,
+      userId: input.userId,
+      gameType: event.ruleSet.gameType,
+      amount: input.amount,
+      reason,
+      createdBy: input.createdBy
+    },
+    include: {
+      event: {
+        select: {
+          name: true
+        }
+      }
+    }
+  });
+}
+
+export async function listAdjustments(guildId: string, eventName?: string, userId?: string, count = 20): Promise<AdjustmentEntry[]> {
+  const normalizedEventName = normalizeEventName(eventName);
+  return prisma.adjustment.findMany({
+    where: {
+      guildId,
+      userId,
+      deletedAt: null,
+      event: normalizedEventName ? { name: normalizedEventName } : undefined
+    },
+    include: {
+      event: {
+        select: {
+          name: true
+        }
+      }
+    },
+    orderBy: {
+      createdAt: "desc"
+    },
+    take: count
+  }) as Promise<AdjustmentEntry[]>;
+}
+
+export async function deleteAdjustment(guildId: string, adjustmentId: string) {
+  const adjustment = await prisma.adjustment.findFirst({
+    where: {
+      guildId,
+      adjustmentId,
+      deletedAt: null
+    }
+  });
+  if (!adjustment) {
+    throw new Error("指定した補正点が見つかりません。");
+  }
+
+  return prisma.adjustment.update({
+    where: {
+      adjustmentId
+    },
+    data: {
+      deletedAt: new Date()
+    }
+  });
+}
+
+export async function getAdjustmentsForEvent(guildId: string, eventName?: string, types?: MahjongType[]) {
+  const eventNameFilter = matchEventNameFilter(types, eventName);
+  const gameTypes = types?.map((type) => gameTypeForMahjongType(normalizeMahjongType(type)));
+  return prisma.adjustment.findMany({
+    where: {
+      guildId,
+      deletedAt: null,
+      gameType: gameTypes ? { in: gameTypes } : undefined,
+      event: eventNameFilter
+    }
+  });
+}
+
 export async function createMatch(
   guildId: string,
   type: MahjongType,
   players: PlayerInput[],
   tournamentName?: string,
   playedAt?: Date,
-  hands?: HandInput[]
+  hands?: HandInput[],
+  eventName?: string
 ) {
   const normalizedType = normalizeMahjongType(type);
-  const calculated = calculateResults(normalizedType, players);
+  const event = await resolveEventForMatch(guildId, normalizedType, eventName);
+  const calculated = calculateResultsWithRuleSet(event.ruleSet, players);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
   return prisma.$transaction(async (tx) => {
@@ -158,6 +286,9 @@ export async function createMatch(
       data: {
         guildId,
         type: normalizedType,
+        gameType: event.ruleSet.gameType,
+        eventId: event.eventId,
+        ruleSetId: event.ruleSetId,
         tournamentName: normalizedTournamentName,
         playedAt,
         hands: hands
@@ -175,6 +306,8 @@ export async function createMatch(
         }
       },
       include: {
+        event: true,
+        ruleSet: true,
         results: {
           orderBy: {
             rank: "asc"
@@ -192,10 +325,12 @@ export async function createExternalMatch(
   tournamentName: string | undefined,
   playedAt: Date | undefined,
   identity: ExternalMatchIdentity,
-  hands?: HandInput[]
+  hands?: HandInput[],
+  eventName?: string
 ) {
   const normalizedType = normalizeMahjongType(type);
-  const calculated = calculateResults(normalizedType, players);
+  const event = await resolveEventForMatch(guildId, normalizedType, eventName);
+  const calculated = calculateResultsWithRuleSet(event.ruleSet, players);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
 
   return prisma.$transaction(async (tx) => {
@@ -209,6 +344,8 @@ export async function createExternalMatch(
       include: {
         match: {
           include: {
+            event: true,
+            ruleSet: true,
             results: {
               orderBy: {
                 rank: "asc"
@@ -232,6 +369,9 @@ export async function createExternalMatch(
       data: {
         guildId,
         type: normalizedType,
+        gameType: event.ruleSet.gameType,
+        eventId: event.eventId,
+        ruleSetId: event.ruleSetId,
         tournamentName: normalizedTournamentName,
         playedAt,
         hands: hands
@@ -249,6 +389,8 @@ export async function createExternalMatch(
         }
       },
       include: {
+        event: true,
+        ruleSet: true,
         results: {
           orderBy: {
             rank: "asc"
@@ -276,6 +418,29 @@ export async function createExternalMatch(
 export function normalizeTournamentName(value?: string | null): string | undefined {
   const normalized = value?.trim();
   return normalized ? normalized : undefined;
+}
+
+function normalizeEventName(value?: string | null): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+function matchEventNameFilter(types?: MahjongType[], eventName?: string, tournamentName?: string) {
+  const normalizedEventName = normalizeEventName(eventName);
+  if (normalizedEventName) {
+    return { name: normalizedEventName };
+  }
+  if (tournamentName) {
+    return undefined;
+  }
+
+  const targetTypes = types?.length ? types.map((type) => normalizeMahjongType(type)) : (["4p", "3p", "4p_east", "3p_east"] as MahjongType[]);
+  const eventNames = [...new Set(targetTypes.map((type) => defaultEventNameForMahjongType(type)))];
+  return {
+    name: {
+      in: eventNames
+    }
+  };
 }
 
 function collectMatchUserIds(players: Array<{ userId: string }>, hands?: HandInput[]): string[] {
@@ -329,10 +494,12 @@ async function periodMatchIdsForTypes(
   types: MahjongType[],
   period: Period,
   userId?: string,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ): Promise<string[] | null> {
   const limit = recentLimit(period);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const eventNameFilter = matchEventNameFilter(types, eventName, normalizedTournamentName);
   if (!limit) {
     return null;
   }
@@ -344,6 +511,7 @@ async function periodMatchIdsForTypes(
         in: types.map((type) => normalizeMahjongType(type))
       },
       tournamentName: normalizedTournamentName,
+      event: eventNameFilter,
       results: userId
         ? {
             some: {
@@ -369,6 +537,7 @@ interface ResultQueryOptions {
   types: MahjongType[];
   userId?: string;
   tournamentName?: string;
+  eventName?: string;
   playedAtStart?: Date;
   playedAtEnd?: Date;
   matchIds?: string[] | null;
@@ -377,6 +546,7 @@ interface ResultQueryOptions {
 
 async function getResultsByOptions(options: ResultQueryOptions) {
   const normalizedTournamentName = normalizeTournamentName(options.tournamentName);
+  const eventNameFilter = matchEventNameFilter(options.types, options.eventName, normalizedTournamentName);
 
   return prisma.result.findMany({
     where: {
@@ -388,6 +558,7 @@ async function getResultsByOptions(options: ResultQueryOptions) {
           options.excludeTournamentMatches
             ? null
             : normalizedTournamentName,
+        event: eventNameFilter,
         matchId: options.matchIds ? { in: options.matchIds } : undefined,
         playedAt:
           options.playedAtStart || options.playedAtEnd
@@ -414,9 +585,10 @@ export async function getResultsForPeriod(
   type: MahjongType,
   period: Period,
   userId?: string,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
-  return getResultsForPeriodByTypes(guildId, [type], period, userId, tournamentName);
+  return getResultsForPeriodByTypes(guildId, [type], period, userId, tournamentName, eventName);
 }
 
 export async function getResultsForPeriodByTypes(
@@ -424,16 +596,18 @@ export async function getResultsForPeriodByTypes(
   types: MahjongType[],
   period: Period,
   userId?: string,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
   const normalizedTypes = types.map((type) => normalizeMahjongType(type));
-  const matchIds = await periodMatchIdsForTypes(guildId, normalizedTypes, period, userId, tournamentName);
+  const matchIds = await periodMatchIdsForTypes(guildId, normalizedTypes, period, userId, tournamentName, eventName);
   const dateRange = periodDateRange(period);
   return getResultsByOptions({
     guildId,
     types: normalizedTypes,
     userId,
     tournamentName,
+    eventName,
     playedAtStart: dateRange?.start,
     playedAtEnd: dateRange?.end,
     matchIds
@@ -447,6 +621,7 @@ export async function getResultsForDateRange(
   end: Date,
   userId?: string,
   tournamentName?: string,
+  eventName?: string,
   excludeTournamentMatches = false
 ) {
   return getResultsByOptions({
@@ -454,15 +629,16 @@ export async function getResultsForDateRange(
     types,
     userId,
     tournamentName,
+    eventName,
     playedAtStart: start,
     playedAtEnd: end,
     excludeTournamentMatches
   });
 }
 
-export async function aggregateStats(guildId: string, type: MahjongType, period: Period, userId: string, tournamentName?: string) {
+export async function aggregateStats(guildId: string, type: MahjongType, period: Period, userId: string, tournamentName?: string, eventName?: string) {
   const normalizedType = normalizeMahjongType(type);
-  const results = await getResultsForPeriod(guildId, type, period, userId, tournamentName);
+  const results = await getResultsForPeriod(guildId, type, period, userId, tournamentName, eventName);
   const totalGames = results.length;
   const totalPoint = results.reduce((sum, result) => sum + result.point, 0);
   const averageRank = totalGames ? results.reduce((sum, result) => sum + result.rank, 0) / totalGames : 0;
@@ -489,12 +665,14 @@ export async function aggregateHandStats(
   type: MahjongType,
   period: Period,
   userId: string,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ): Promise<AggregatedHandStats> {
   const normalizedType = normalizeMahjongType(type);
-  const matchIds = await periodMatchIdsForTypes(guildId, [type], period, userId, tournamentName);
+  const matchIds = await periodMatchIdsForTypes(guildId, [type], period, userId, tournamentName, eventName);
   const dateRange = periodDateRange(period);
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const eventNameFilter = matchEventNameFilter([normalizedType], eventName, normalizedTournamentName);
 
   const [handRows, matchResults] = await Promise.all([
     prisma.handPlayerStat.findMany({
@@ -508,6 +686,7 @@ export async function aggregateHandStats(
             guildId,
             type: normalizedType,
             tournamentName: normalizedTournamentName,
+            event: eventNameFilter,
             matchId: matchIds ? { in: matchIds } : undefined,
             playedAt:
               dateRange
@@ -544,6 +723,7 @@ export async function aggregateHandStats(
       types: [normalizedType],
       userId,
       tournamentName,
+      eventName,
       playedAtStart: dateRange?.start,
       playedAtEnd: dateRange?.end,
       matchIds
@@ -573,8 +753,8 @@ export async function aggregateHandStats(
   );
 }
 
-export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
-  const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
+export async function ranking(guildId: string, type: MahjongType, period: Period, tournamentName?: string, eventName?: string) {
+  const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName, eventName);
   return buildRankingFromResults(results);
 }
 
@@ -582,9 +762,10 @@ export async function rankingByTypes(
   guildId: string,
   types: MahjongType[],
   period: Period,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
-  const results = await getResultsForPeriodByTypes(guildId, types, period, undefined, tournamentName);
+  const results = await getResultsForPeriodByTypes(guildId, types, period, undefined, tournamentName, eventName);
   return buildRankingFromResults(results);
 }
 
@@ -674,9 +855,10 @@ export async function rankingForDateRange(
   type: MahjongType,
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
-  const results = await getResultsForDateRange(guildId, [type], start, end, undefined, tournamentName);
+  const results = await getResultsForDateRange(guildId, [type], start, end, undefined, tournamentName, eventName);
   return buildRankingFromResults(results);
 }
 
@@ -685,9 +867,10 @@ export async function rankingForDateRangeByTypes(
   types: MahjongType[],
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
-  const results = await getResultsForDateRange(guildId, types, start, end, undefined, tournamentName);
+  const results = await getResultsForDateRange(guildId, types, start, end, undefined, tournamentName, eventName);
   return buildRankingFromResults(results);
 }
 
@@ -696,9 +879,10 @@ export async function rankingWithLatestMatchDeltaForDateRange(
   type: MahjongType,
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
-  return rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, [type], start, end, tournamentName);
+  return rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, [type], start, end, tournamentName, eventName);
 }
 
 export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
@@ -706,10 +890,12 @@ export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
   types: MahjongType[],
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
   const normalizedTypes = types.map((type) => normalizeMahjongType(type));
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const normalizedEventName = normalizeEventName(eventName);
   const latestMatch = await prisma.match.findFirst({
     where: {
       guildId,
@@ -717,6 +903,7 @@ export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
         in: normalizedTypes
       },
       tournamentName: normalizedTournamentName,
+      event: normalizedEventName ? { name: normalizedEventName } : undefined,
       playedAt: {
         gte: start,
         lt: end
@@ -735,7 +922,7 @@ export async function rankingWithLatestMatchDeltaForDateRangeByTypes(
     }
   });
 
-  const results = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName);
+  const results = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName, eventName);
   const current = buildRankingFromResults(results);
   if (!latestMatch) {
     return {
@@ -758,10 +945,12 @@ export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
   types: MahjongType[],
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
   const normalizedTypes = types.map((type) => normalizeMahjongType(type));
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const normalizedEventName = normalizeEventName(eventName);
   const latestMatch = await prisma.match.findFirst({
     where: {
       guildId,
@@ -769,6 +958,7 @@ export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
         in: normalizedTypes
       },
       tournamentName: normalizedTournamentName,
+      event: normalizedEventName ? { name: normalizedEventName } : undefined,
       playedAt: {
         gte: start,
         lt: end
@@ -787,7 +977,7 @@ export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
     }
   });
 
-  const currentResults = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName);
+  const currentResults = await getResultsForDateRange(guildId, normalizedTypes, start, end, undefined, tournamentName, eventName);
   return {
     currentResults,
     previousResults: latestMatch
@@ -797,9 +987,11 @@ export async function resultsWithLatestMatchDeltaForDateRangeByTypes(
   };
 }
 
-export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string) {
+export async function records(guildId: string, type: MahjongType, period: Period, tournamentName?: string, eventName?: string) {
   const normalizedType = normalizeMahjongType(type);
-  const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName);
+  const results = await getResultsForPeriod(guildId, type, period, undefined, tournamentName, eventName);
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const eventNameFilter = matchEventNameFilter([normalizedType], eventName, normalizedTournamentName);
   const handRecords =
     normalizedType === "4p"
       ? await prisma.handPlayerStat.findMany({
@@ -808,7 +1000,8 @@ export async function records(guildId: string, type: MahjongType, period: Period
               match: {
                 guildId,
                 type: normalizedType,
-                tournamentName: normalizeTournamentName(tournamentName),
+                tournamentName: normalizedTournamentName,
+                event: eventNameFilter,
                 matchId: {
                   in: [...new Set(results.map((result) => result.match.matchId))]
                 }
@@ -831,10 +1024,13 @@ export async function recordsForDateRange(
   type: MahjongType,
   start: Date,
   end: Date,
-  tournamentName?: string
+  tournamentName?: string,
+  eventName?: string
 ) {
   const normalizedType = normalizeMahjongType(type);
-  const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName);
+  const results = await getResultsForDateRange(guildId, [normalizedType], start, end, undefined, tournamentName, eventName);
+  const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const eventNameFilter = matchEventNameFilter([normalizedType], eventName, normalizedTournamentName);
   const handRecords =
     normalizedType === "4p"
       ? await prisma.handPlayerStat.findMany({
@@ -843,7 +1039,8 @@ export async function recordsForDateRange(
               match: {
                 guildId,
                 type: normalizedType,
-                tournamentName: normalizeTournamentName(tournamentName),
+                tournamentName: normalizedTournamentName,
+                event: eventNameFilter,
                 matchId: {
                   in: [...new Set(results.map((result) => result.match.matchId))]
                 }
@@ -863,8 +1060,8 @@ export async function recordsForDateRange(
 
 export async function seasonAwards(guildId: string, season: SeasonWindow) {
   const [results, fourPlayerResults, fourPlayerHands, bonuses] = await Promise.all([
-    getResultsForDateRange(guildId, ["3p", "4p"], season.start, season.end, undefined, undefined, true),
-    getResultsForDateRange(guildId, ["4p"], season.start, season.end, undefined, undefined, true),
+    getResultsForDateRange(guildId, ["3p", "4p"], season.start, season.end, undefined, undefined, undefined, true),
+    getResultsForDateRange(guildId, ["4p"], season.start, season.end, undefined, undefined, undefined, true),
     prisma.handPlayerStat.findMany({
       where: {
         hand: {
@@ -901,13 +1098,16 @@ export async function deleteMatch(guildId: string, matchId: string) {
   });
 }
 
-export async function listMatches(guildId: string, count: number, type?: MahjongType, tournamentName?: string) {
+export async function listMatches(guildId: string, count: number, type?: MahjongType, tournamentName?: string, eventName?: string) {
   const normalizedTournamentName = normalizeTournamentName(tournamentName);
+  const normalizedType = type ? normalizeMahjongType(type) : undefined;
+  const eventNameFilter = matchEventNameFilter(normalizedType ? [normalizedType] : undefined, eventName, normalizedTournamentName);
   return prisma.match.findMany({
     where: {
       guildId,
-      type: type ? normalizeMahjongType(type) : undefined,
-      tournamentName: normalizedTournamentName
+      type: normalizedType,
+      tournamentName: normalizedTournamentName,
+      event: eventNameFilter
     },
     orderBy: [
       {
@@ -919,6 +1119,8 @@ export async function listMatches(guildId: string, count: number, type?: Mahjong
     ],
     take: count,
     include: {
+      event: true,
+      ruleSet: true,
       externalMatch: true,
       results: {
         orderBy: {

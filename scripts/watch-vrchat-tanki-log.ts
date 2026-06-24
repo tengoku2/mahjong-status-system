@@ -9,6 +9,7 @@ interface WatchOptions {
   apiUrl: string;
   apiKey?: string;
   guildId?: string;
+  eventName?: string;
   logPath?: string;
   autoFollowLatestLog: boolean;
   dryRun: boolean;
@@ -23,6 +24,7 @@ interface TankiLogPayload {
   type: string;
   playedAt?: string;
   tournamentName?: string;
+  eventName?: string;
   externalSource?: string;
   externalMatchId?: string;
   aborted?: boolean;
@@ -50,6 +52,7 @@ function options(): WatchOptions {
     apiUrl: process.env.TANKI_API_URL?.trim() || "https://mjs-tengoku2-a8a007d5.koyeb.app/api/matches",
     apiKey: localOnly ? process.env.EXTERNAL_API_KEY?.trim() : requireEnv("EXTERNAL_API_KEY"),
     guildId: process.env.TANKI_GUILD_ID?.trim() || process.env.DISCORD_GUILD_ID?.trim(),
+    eventName: process.env.TANKI_EVENT_NAME?.trim() || undefined,
     logPath: process.env.TANKI_LOG_PATH?.trim(),
     autoFollowLatestLog: (process.env.TANKI_AUTO_FOLLOW_LATEST_LOG ?? "true").toLowerCase() !== "false",
     dryRun: (process.env.TANKI_DRY_RUN ?? "true").toLowerCase() !== "false",
@@ -111,6 +114,7 @@ function normalizePayload(raw: unknown, opts: WatchOptions): TankiLogPayload {
   return {
     ...payload,
     guildId: payload.guildId || opts.guildId,
+    eventName: payload.eventName?.trim() || opts.eventName,
     externalSource: payload.externalSource || "tanki-log",
     externalMatchId: makeExternalMatchId(payload),
     aborted: payload.aborted === true,

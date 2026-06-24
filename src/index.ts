@@ -18,6 +18,18 @@ import {
   type StringSelectMenuInteraction
 } from "discord.js";
 import { createApiServer } from "./external-api.js";
+import {
+  closeEvent,
+  createEventByRuleSetName,
+  ensureStandardEvents,
+  eventKindLabel,
+  eventStatusLabel,
+  gameTypeLabel,
+  listEvents,
+  listRuleSets,
+  parseEventKind,
+  parseEventListStatus
+} from "./events.js";
 import { buildSeasonExportBundle, csvAttachment } from "./export.js";
 import { guildRulesFor } from "./guild-rules.js";
 import type { AwardSummary } from "./awards.js";
@@ -47,7 +59,7 @@ import { prisma } from "./prisma.js";
 import { calculateRankMovements, movementSymbol } from "./rank-movement.js";
 import { expectedPlayerCount, normalizeMahjongType } from "./scoring.js";
 import { formatPenaltySuffix, isManager, lockStateForPeriod, lockStateForSeason, latestConcludedSeason } from "./season-lock.js";
-import { aggregateHandStats, aggregateStats, applyBonusToRankingEntries, buildMvpRankingFromResults, buildSeasonBonusMap, createMatch, createSeasonBonus, deleteMatch, ensureGuildAndUsers, getResultsForDateRange, getResultsForPeriodByTypes, getSeasonBonuses, latestMatch, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type AggregatedHandStats, type MvpRankingEntry, type RankingEntry } from "./services.js";
+import { aggregateHandStats, aggregateStats, applyAdjustmentsToRankingEntries, applyBonusToRankingEntries, buildAdjustmentMap, buildMvpRankingFromResults, buildSeasonBonusMap, createAdjustment, createMatch, createSeasonBonus, deleteAdjustment, deleteMatch, ensureGuildAndUsers, getAdjustmentsForEvent, getResultsForDateRange, getResultsForPeriodByTypes, getSeasonBonuses, latestMatch, listAdjustments, listMatches, ranking, rankingByTypes, rankingForDateRange, rankingForDateRangeByTypes, rankingWithLatestMatchDeltaForDateRangeByTypes, records, recordsForDateRange, resultsWithLatestMatchDeltaForDateRangeByTypes, seasonAwards, type AggregatedHandStats, type MvpRankingEntry, type RankingEntry } from "./services.js";
 import type { MatchRecord, PlayerRecord } from "./records.js";
 import type { MahjongType, Period, PlayerInput, SeasonBonusTarget, SeasonCode } from "./types.js";
 import { validatePlayers } from "./validation.js";
@@ -77,6 +89,7 @@ const pendingRecordOptions = new Map<
   {
     type: MahjongType;
     tournamentName?: string;
+    eventName?: string;
     playedAt: Date;
     players: Array<{ userId: string; rank: number }>;
   }
@@ -199,6 +212,33 @@ function isMvpRankingEntry(entry: RankingEntry | MvpRankingEntry): entry is MvpR
 function tournamentOption(interaction: ChatInputCommandInteraction): string | undefined {
   const tournamentName = interaction.options.getString("tournament_name")?.trim();
   return tournamentName || undefined;
+}
+
+function eventOption(interaction: ChatInputCommandInteraction): string | undefined {
+  const eventName = interaction.options.getString("event")?.trim();
+  return eventName || undefined;
+}
+
+function filterSuffix(tournamentName?: string, eventName?: string): string {
+  return [
+    eventName ? `Event: ${eventName}` : undefined,
+    tournamentName ? `大会名: ${tournamentName}` : undefined
+  ].filter(Boolean).join(" / ");
+}
+
+function prefixedFilterSuffix(tournamentName?: string, eventName?: string): string {
+  const suffix = filterSuffix(tournamentName, eventName);
+  return suffix ? ` / ${suffix}` : "";
+}
+
+function mergePointMaps(...maps: Array<Map<string, number>>): Map<string, number> {
+  const merged = new Map<string, number>();
+  for (const map of maps) {
+    for (const [userId, point] of map) {
+      merged.set(userId, (merged.get(userId) ?? 0) + point);
+    }
+  }
+  return merged;
 }
 
 function parsePlayedAtOption(interaction: ChatInputCommandInteraction): Date {
@@ -414,6 +454,7 @@ async function handleRecordCommand(interaction: ChatInputCommandInteraction) {
   pendingRecordOptions.set(customId, {
     type,
     tournamentName: tournamentOption(interaction),
+    eventName: eventOption(interaction),
     playedAt: parsePlayedAtOption(interaction),
     players
   });
@@ -438,7 +479,7 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
   }));
 
   validatePlayers(pending.type, players);
-  const match = await createMatch(guildId, pending.type, players, pending.tournamentName, pending.playedAt);
+  const match = await createMatch(guildId, pending.type, players, pending.tournamentName, pending.playedAt, undefined, pending.eventName);
   const fields = await Promise.all(
     match.results.map(async (result) => {
       const member = await fetchMember(interaction, result.userId);
@@ -455,7 +496,7 @@ async function handleRecordModal(interaction: ModalSubmitInteraction) {
       new EmbedBuilder()
         .setTitle(`${typeLabel(pending.type)} 対局を登録しました`)
         .setDescription(
-          `種別: ${typeLabel(pending.type)}\n対局日: ${formatDate(match.playedAt)}${
+          `種別: ${typeLabel(pending.type)}\nEvent: ${match.event?.name ?? "-"}\nRuleSet: ${match.ruleSet?.name ?? "-"}\n対局日: ${formatDate(match.playedAt)}${
             match.tournamentName ? `\n大会名: ${match.tournamentName}` : ""
           }`
         )
@@ -479,9 +520,10 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
     return;
   }
   const tournamentName = tournamentOption(interaction);
+  const eventName = eventOption(interaction);
   const [stats, handStats] = await Promise.all([
-    aggregateStats(guildId, type, period, user.id, tournamentName),
-    aggregateHandStats(guildId, type, period, user.id, tournamentName)
+    aggregateStats(guildId, type, period, user.id, tournamentName, eventName),
+    aggregateHandStats(guildId, type, period, user.id, tournamentName, eventName)
   ]);
   const name = await displayName(guildId, await fetchMember(interaction, user.id), user.id);
   const rankFields = [...stats.rankCounts.entries()].map(([rank, count]) => ({
@@ -504,7 +546,7 @@ async function handleStats(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setTitle(`${typeLabel(type)} ${name} の成績`)
         .setDescription(
-          `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}`
+          `種別: ${typeLabel(type)} / 期間: ${formatPeriodLabel(period)}${prefixedFilterSuffix(tournamentName, eventName)}`
         )
         .addFields(
           { name: "総対局数", value: `${stats.totalGames}`, inline: true },
@@ -528,7 +570,8 @@ async function handleHistory(interaction: ChatInputCommandInteraction) {
   const user = interaction.options.getUser("user") ?? interaction.user;
   const type = typeOption(interaction);
   const count = interaction.options.getInteger("count") ?? 10;
-  const stats = await aggregateStats(guildId, type, "all", user.id);
+  const eventName = eventOption(interaction);
+  const stats = await aggregateStats(guildId, type, "all", user.id, undefined, eventName);
   const name = await displayName(guildId, await fetchMember(interaction, user.id), user.id);
   const lines = stats.results.slice(0, count).map((result) => {
     return `\`${result.match.matchId}\` ${formatDate(result.match.playedAt)} ${result.rank}位 ${result.rawScore}点 ${formatPoint(
@@ -540,7 +583,7 @@ async function handleHistory(interaction: ChatInputCommandInteraction) {
     embeds: [
       new EmbedBuilder()
         .setTitle(`${typeLabel(type)} ${name} の履歴`)
-        .setDescription(`種別: ${typeLabel(type)}\n${lines.join("\n") || "対局履歴がありません。"}`)
+        .setDescription(`種別: ${typeLabel(type)}${prefixedFilterSuffix(undefined, eventName)}\n${lines.join("\n") || "対局履歴がありません。"}`)
     ]
   });
 }
@@ -554,7 +597,8 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
   const type = optionalTypeOption(interaction);
   const count = interaction.options.getInteger("count") ?? 10;
   const tournamentName = tournamentOption(interaction);
-  const matches = await listMatches(guildId, count, type, tournamentName);
+  const eventName = eventOption(interaction);
+  const matches = await listMatches(guildId, count, type, tournamentName, eventName);
 
   if (matches.length === 0) {
     await interaction.editReply({
@@ -562,7 +606,7 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
         new EmbedBuilder()
           .setTitle("対局一覧")
           .setDescription(
-            `条件: ${type ? typeLabel(type) : "全種別"}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n対象の対局がありません。`
+            `条件: ${type ? typeLabel(type) : "全種別"}${prefixedFilterSuffix(tournamentName, eventName)}\n対象の対局がありません。`
           )
       ]
     });
@@ -579,6 +623,8 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
         })
       );
       const meta = [
+        match.event ? `Event: ${match.event.name}` : undefined,
+        match.ruleSet ? `RuleSet: ${match.ruleSet.name}` : undefined,
         match.tournamentName ? `大会名: ${match.tournamentName}` : undefined,
         match.externalMatch ? `外部: ${match.externalMatch.externalSource}/${match.externalMatch.externalMatchId}` : undefined
       ].filter(Boolean);
@@ -597,7 +643,7 @@ async function handleMatchList(interaction: ChatInputCommandInteraction) {
       new EmbedBuilder()
         .setTitle("対局一覧")
         .setDescription(
-          `条件: ${type ? typeLabel(type) : "全種別"} / 表示件数: ${matches.length}${tournamentName ? ` / 大会名: ${tournamentName}` : ""}\n削除する場合は \`/mjs del match_id\` に対象IDを指定してください。`
+          `条件: ${type ? typeLabel(type) : "全種別"} / 表示件数: ${matches.length}${prefixedFilterSuffix(tournamentName, eventName)}\n削除する場合は \`/mjs del match_id\` に対象IDを指定してください。`
         )
         .addFields(fields)
     ]
@@ -616,6 +662,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const rankingScope = isMvpRanking ? "\u5bfe\u8c61: 3\u4eba\u534a\u8358 + 4\u4eba\u534a\u8358" : `\u7a2e\u5225: ${typeLabel(rankingTypes[0])}`;
   const { season, period } = resolveLeaderboardWindow(interaction);
   const tournamentName = tournamentOption(interaction);
+  const eventName = eventOption(interaction);
   if (!(await ensureSeasonLockAccess(interaction, "ranking", { season, period }))) {
     return;
   }
@@ -623,6 +670,8 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
   const showMvpPenalty = isMvpRanking && rules.useSeasonPenalty && (season ? isCurrentSeasonWindow(season) : true);
   const bonusByUser =
     season && rules.useSeasonBonus ? buildSeasonBonusMap(await getSeasonBonuses(guildId, season, rankingTypes)) : new Map<string, number>();
+  const adjustmentByUser = buildAdjustmentMap(await getAdjustmentsForEvent(guildId, eventName, rankingTypes));
+  const mvpExtraPointByUser = mergePointMaps(bonusByUser, adjustmentByUser);
   let computedRankingData: {
     current: Array<RankingEntry | MvpRankingEntry>;
     previous: Array<RankingEntry | MvpRankingEntry>;
@@ -631,35 +680,39 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
 
   if (isMvpRanking && season) {
     const resultSet = showMovement
-      ? await resultsWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
+      ? await resultsWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName, eventName)
       : {
-          currentResults: await getResultsForDateRange(guildId, rankingTypes, season.start, season.end, undefined, tournamentName),
+          currentResults: await getResultsForDateRange(guildId, rankingTypes, season.start, season.end, undefined, tournamentName, eventName),
           previousResults: [],
           latestMatchId: null
         };
     computedRankingData = {
-      current: buildMvpRankingFromResults(resultSet.currentResults, bonusByUser),
-      previous: buildMvpRankingFromResults(resultSet.previousResults, bonusByUser),
+      current: buildMvpRankingFromResults(resultSet.currentResults, mvpExtraPointByUser),
+      previous: buildMvpRankingFromResults(resultSet.previousResults, mvpExtraPointByUser),
       latestMatchId: resultSet.latestMatchId
     };
   } else if (season) {
     const rankingData = showMovement
-      ? await rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName)
+      ? await rankingWithLatestMatchDeltaForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName, eventName)
       : {
-          current: await rankingForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName),
+          current: await rankingForDateRangeByTypes(guildId, rankingTypes, season.start, season.end, tournamentName, eventName),
           previous: [],
           latestMatchId: null
         };
     computedRankingData = {
-      current: applyBonusToRankingEntries(rankingData.current, bonusByUser),
-      previous: applyBonusToRankingEntries(rankingData.previous, bonusByUser),
+      current: applyAdjustmentsToRankingEntries(applyBonusToRankingEntries(rankingData.current, bonusByUser), adjustmentByUser),
+      previous: applyAdjustmentsToRankingEntries(applyBonusToRankingEntries(rankingData.previous, bonusByUser), adjustmentByUser),
       latestMatchId: rankingData.latestMatchId
     };
   } else {
+    const current = type
+      ? applyAdjustmentsToRankingEntries(await ranking(guildId, type, period!, tournamentName, eventName), adjustmentByUser)
+      : buildMvpRankingFromResults(
+          await getResultsForPeriodByTypes(guildId, rankingTypes, period!, undefined, tournamentName, eventName),
+          adjustmentByUser
+        );
     computedRankingData = {
-      current: type
-        ? await ranking(guildId, type, period!, tournamentName)
-        : buildMvpRankingFromResults(await getResultsForPeriodByTypes(guildId, rankingTypes, period!, undefined, tournamentName)),
+      current,
       previous: [],
       latestMatchId: null
     };
@@ -680,6 +733,10 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
       if (isMvpRankingEntry(entry) && showMvpPenalty && entry.penaltyPoint > 0) {
         detailParts.push(`\u501f\u91d1${formatPenaltySuffix(entry.penaltyPoint)}`);
       }
+      const adjustmentPoint = adjustmentByUser.get(entry.userId) ?? 0;
+      if (adjustmentPoint !== 0) {
+        detailParts.push(`補正 ${formatPoint(adjustmentPoint)}pt`);
+      }
       return `${movement}${index + 1}. ${name} ${displayPoint}\n   ${detailParts.join(" / ")}`;
     })
   );
@@ -690,7 +747,7 @@ async function handleRanking(interaction: ChatInputCommandInteraction) {
         .setTitle(`${rankingLabel} \u30dd\u30a4\u30f3\u30c8\u30e9\u30f3\u30ad\u30f3\u30b0 ${season ? formatSeasonLabel(season) : formatPeriodLabel(period!)}`)
         .setDescription(
           `${rankingScope} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
-            tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
+            prefixedFilterSuffix(tournamentName, eventName)
           }
 \n${lines.join("\n\n") || "\u5bfe\u8c61\u30c7\u30fc\u30bf\u304c\u3042\u308a\u307e\u305b\u3093"}`
         )
@@ -707,9 +764,10 @@ async function handleRecords(interaction: ChatInputCommandInteraction) {
     return;
   }
   const tournamentName = tournamentOption(interaction);
+  const eventName = eventOption(interaction);
   const currentRecords = season
-    ? await recordsForDateRange(guildId, type, season.start, season.end, tournamentName)
-    : await records(guildId, type, period!, tournamentName);
+    ? await recordsForDateRange(guildId, type, season.start, season.end, tournamentName, eventName)
+    : await records(guildId, type, period!, tournamentName, eventName);
   const nameCache = new Map<string, string>();
   const nameFor = async (userId: string) => {
     const cached = nameCache.get(userId);
@@ -775,7 +833,7 @@ ${matchText(record.playedAt)}` ,
         .setTitle(`${typeLabel(type)} 期間内ベスト`)
         .setDescription(
           `\u7a2e\u5225: ${typeLabel(type)} / ${season ? `\u30b7\u30fc\u30ba\u30f3: ${formatSeasonLabel(season)}` : `\u671f\u9593: ${formatPeriodLabel(period!)}`}${
-            tournamentName ? ` / \u5927\u4f1a\u540d: ${tournamentName}` : ""
+            prefixedFilterSuffix(tournamentName, eventName)
           }
 \u5bfe\u8c61\u5bfe\u5c40\u6570: ${currentRecords.totalMatches}`
         )
@@ -1558,6 +1616,222 @@ async function handleMembers(interaction: ChatInputCommandInteraction) {
   });
 }
 
+async function handleEventRules(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  await ensureStandardEvents(guildId);
+  const ruleSets = await listRuleSets(guildId);
+
+  const lines = ruleSets.map((ruleSet) =>
+    [
+      `\`${ruleSet.name}\``,
+      gameTypeLabel(ruleSet.gameType),
+      `${ruleSet.startScore}点開始/${ruleSet.returnScore}点返し`,
+      `ウマ ${formatUma(ruleSet.uma)}`,
+      ruleSet.allowBust ? "飛びあり" : "飛びなし",
+      ruleSet.allowAgariYame ? "アガリやめあり" : "アガリやめなし"
+    ].join(" / ")
+  );
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("RuleSet一覧")
+        .setDescription(lines.length ? lines.join("\n") : "RuleSetがありません。")
+    ]
+  });
+}
+
+async function handleEventList(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  await ensureStandardEvents(guildId);
+  const status = parseEventListStatus(interaction.options.getString("status"));
+  const events = await listEvents(guildId, status);
+
+  const lines = events.map((event) =>
+    [
+      `\`${event.name}\``,
+      eventKindLabel(event.kind),
+      eventStatusLabel(event.status),
+      gameTypeLabel(event.ruleSet.gameType),
+      `RuleSet: ${event.ruleSet.name}`
+    ].join(" / ")
+  );
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("Event一覧")
+        .setDescription(lines.length ? lines.join("\n") : "Eventがありません。")
+    ]
+  });
+}
+
+async function handleEventCreate(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
+    return;
+  }
+
+  const event = await createEventByRuleSetName(guildId, {
+    name: interaction.options.getString("name", true),
+    kind: parseEventKind(interaction.options.getString("kind", true)),
+    ruleSetName: interaction.options.getString("rule_set", true)
+  });
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("Eventを作成しました")
+        .setDescription(
+          [
+            `Event: \`${event.name}\``,
+            `種別: ${eventKindLabel(event.kind)}`,
+            `状態: ${eventStatusLabel(event.status)}`,
+            `RuleSet: ${event.ruleSet.name} / ${gameTypeLabel(event.ruleSet.gameType)}`
+          ].join("\n")
+        )
+    ]
+  });
+}
+
+async function handleEventClose(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
+    return;
+  }
+
+  const event = await closeEvent(guildId, interaction.options.getString("name", true));
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("Eventを終了しました")
+        .setDescription(
+          [
+            `Event: \`${event.name}\``,
+            `種別: ${eventKindLabel(event.kind)}`,
+            `状態: ${eventStatusLabel(event.status)}`,
+            `RuleSet: ${event.ruleSet.name} / ${gameTypeLabel(event.ruleSet.gameType)}`
+          ].join("\n")
+        )
+    ]
+  });
+}
+
+async function handleEventCommand(interaction: ChatInputCommandInteraction) {
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "rules") {
+    await handleEventRules(interaction);
+  } else if (subcommand === "list") {
+    await handleEventList(interaction);
+  } else if (subcommand === "create") {
+    await handleEventCreate(interaction);
+  } else if (subcommand === "close") {
+    await handleEventClose(interaction);
+  }
+}
+
+function formatUma(value: unknown): string {
+  return Array.isArray(value) && value.every((item) => typeof item === "number") ? value.join(" / ") : String(value);
+}
+
+async function handleAdjustAdd(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
+    return;
+  }
+
+  const user = interaction.options.getUser("user", true);
+  await assertGuildMember(interaction, user.id);
+  const type = typeOption(interaction);
+  const eventName = interaction.options.getString("event", true);
+  const amount = interaction.options.getNumber("amount", true);
+  const reason = interaction.options.getString("reason", true);
+
+  const adjustment = await createAdjustment(guildId, {
+    eventName,
+    type,
+    userId: user.id,
+    amount,
+    reason,
+    createdBy: interaction.user.id
+  });
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("補正点を追加しました")
+        .setDescription(
+          [
+            `補正ID: \`${adjustment.adjustmentId}\``,
+            `Event: ${adjustment.event.name}`,
+            `対象: ${await displayName(guildId, await fetchMember(interaction, user.id), user.id)}`,
+            `補正: ${formatPoint(adjustment.amount)}pt`,
+            `理由: ${adjustment.reason}`
+          ].join("\n")
+        )
+    ]
+  });
+}
+
+async function handleAdjustList(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  const user = interaction.options.getUser("user");
+  const eventName = eventOption(interaction);
+  const count = interaction.options.getInteger("count") ?? 20;
+  const adjustments = await listAdjustments(guildId, eventName, user?.id, count);
+
+  const lines = await Promise.all(
+    adjustments.map(async (adjustment) => {
+      const name = await displayName(guildId, await fetchMember(interaction, adjustment.userId), adjustment.userId);
+      return `\`${adjustment.adjustmentId}\` ${formatDate(adjustment.createdAt)} ${adjustment.event.name} / ${name} / ${formatPoint(
+        adjustment.amount
+      )}pt / ${adjustment.reason}`;
+    })
+  );
+
+  await interaction.editReply({
+    embeds: [
+      new EmbedBuilder()
+        .setTitle("補正点一覧")
+        .setDescription(lines.length ? lines.join("\n") : "補正点はありません。")
+    ]
+  });
+}
+
+async function handleAdjustDelete(interaction: ChatInputCommandInteraction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guildId = requireGuildId(interaction);
+  if (!hasManagerAccess(interaction)) {
+    await interaction.editReply("この操作はサーバー管理者または開発者のみ実行できます。");
+    return;
+  }
+
+  const adjustmentId = interaction.options.getString("adjustment_id", true);
+  await deleteAdjustment(guildId, adjustmentId);
+  await interaction.editReply(`補正点 \`${adjustmentId}\` を削除しました。`);
+}
+
+async function handleAdjustCommand(interaction: ChatInputCommandInteraction) {
+  const subcommand = interaction.options.getSubcommand();
+  if (subcommand === "add") {
+    await handleAdjustAdd(interaction);
+  } else if (subcommand === "list") {
+    await handleAdjustList(interaction);
+  } else if (subcommand === "delete") {
+    await handleAdjustDelete(interaction);
+  }
+}
+
 async function handleHelp(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const guildId = requireGuildId(interaction);
@@ -1576,6 +1850,11 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs del` 指定した対局を削除",
     "`/mjs undo` 最新の対局を削除",
     "`/mjs members` VRC名の登録一覧を表示",
+    "`/mjs event list` Event一覧を表示",
+    "`/mjs event create` Eventを作成",
+    "`/mjs event close` Eventを終了",
+    "`/mjs adjust add` Event別の補正点を追加",
+    "`/mjs adjust list` 補正点一覧を表示",
     "`/mjs help` このヘルプを表示"
   ];
 
@@ -1607,6 +1886,16 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
 
 async function handleChatInput(interaction: ChatInputCommandInteraction) {
   if (interaction.commandName !== "mjs") {
+    return;
+  }
+
+  const subcommandGroup = interaction.options.getSubcommandGroup(false);
+  if (subcommandGroup === "event") {
+    await handleEventCommand(interaction);
+    return;
+  }
+  if (subcommandGroup === "adjust") {
+    await handleAdjustCommand(interaction);
     return;
   }
 

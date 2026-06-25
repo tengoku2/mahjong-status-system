@@ -133,6 +133,32 @@ rawScore合計 = 105,000 - 供託本数 * 1,000
 この整合が崩れている場合、API側で登録を拒否する。
 ローカル側で原因を確認し、正しい結果を出せる状態にしてから register する。
 
+## 登録済み対局の修正
+
+登録後に最終持ち点の誤りを見つけた場合は、管理スクリプトで修正する。
+デフォルトは dry-run なので、まず `--apply` を付けずに確認する。
+
+```powershell
+cmd /c scripts\with-node22.cmd run admin:fix-result -- --match-id "対局ID" --user-id "DiscordユーザーID" --raw-score 修正後の点数 --sync-last-hand
+```
+
+表示された内容に問題がなければ `--apply` を付けて実行する。
+
+```powershell
+cmd /c scripts\with-node22.cmd run admin:fix-result -- --match-id "対局ID" --user-id "DiscordユーザーID" --raw-score 修正後の点数 --sync-last-hand --apply
+```
+
+`--sync-last-hand` は、最後の局の最終点も同じ点数へ直したい場合に使う。
+半荘結果だけを直したい場合は付けない。
+
+修正後は Discord で以下を確認する。
+
+```text
+/mjs matches
+/mjs stats
+/mjs rank
+```
+
 ## 次にやること
 
 現在は Aiven への v2 適用と通常登録の疎通は完了済み。

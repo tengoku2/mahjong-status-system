@@ -16,6 +16,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:migrate:sqlite-to-postgres": "tsx scripts/migrate-sqlite-to-postgres.ts",
     "rules:seed": "tsx scripts/seed-rule-sets.ts",
+    "admin:fix-result": "tsx scripts/admin-fix-match-result.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },

@@ -206,6 +206,22 @@ function normalizeHandEndType(value: unknown, fieldName: string): HandEndType {
   return text;
 }
 
+function initialScoreTotal(type: MahjongType): number {
+  return type === "3p" || type === "3p_east" ? 105000 : 100000;
+}
+
+function validateExternalScoreTotal(type: MahjongType, players: ParsedExternalPlayer[], hands: ParsedExternalHand[] | undefined) {
+  const kyotaku = hands?.at(-1)?.kyotaku ?? 0;
+  const expectedTotal = initialScoreTotal(type) - kyotaku * 1000;
+  const actualTotal = players.reduce((sum, player) => sum + player.rawScore, 0);
+  if (actualTotal !== expectedTotal) {
+    throw new HttpError(
+      400,
+      `rawScore total must be ${expectedTotal} for ${type} with kyotaku ${kyotaku}, but got ${actualTotal}.`
+    );
+  }
+}
+
 function parsePlayedAt(value: unknown): Date | undefined {
   if (value === undefined || value === null || value === "") {
     return undefined;
@@ -523,6 +539,7 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   const players = await resolvePlayersByDisplayName(guildId, parsedPlayers);
   const hands = await resolveHandsByDisplayName(guildId, parsedHands);
   validatePlayers(type, players);
+  validateExternalScoreTotal(type, parsedPlayers, parsedHands);
   await assertGuildMembers(client, guildId, players, hands);
   const event = await resolveEventForMatch(guildId, type, eventName);
 

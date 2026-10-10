@@ -11,6 +11,12 @@ import { validatePlayers } from "./validation.js";
 const maxBodyBytes = 64 * 1024;
 const idPattern = /^\d{17,20}$/;
 
+type DatabaseHealthCheck = () => Promise<void>;
+
+async function checkDatabaseConnection(): Promise<void> {
+  await prisma.$queryRaw`SELECT 1`;
+}
+
 interface ExternalMatchPayload {
   guildId?: unknown;
   type?: unknown;
@@ -611,10 +617,27 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
   });
 }
 
-export function createApiServer(client: Client) {
+export function createApiServer(client: Client, checkDatabase: DatabaseHealthCheck = checkDatabaseConnection) {
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
+
+      if (request.method === "GET" && url.pathname === "/health/db") {
+        try {
+          await checkDatabase();
+          sendJson(response, 200, {
+            ok: true,
+            databaseReady: true
+          });
+        } catch (error) {
+          console.error("Database health check failed.", error);
+          sendJson(response, 503, {
+            ok: false,
+            databaseReady: false
+          });
+        }
+        return;
+      }
 
       if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
         sendJson(response, 200, {

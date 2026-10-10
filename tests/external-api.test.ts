@@ -11,8 +11,8 @@ function fakeClient(discordReady: boolean): Client {
   } as unknown as Client;
 }
 
-async function get(path: string) {
-  const server = createApiServer(fakeClient(true));
+async function get(path: string, checkDatabase?: () => Promise<void>) {
+  const server = createApiServer(fakeClient(true), checkDatabase);
   servers.push(server);
 
   await new Promise<void>((resolve) => server.listen(0, resolve));
@@ -49,6 +49,32 @@ describe("health endpoint", () => {
     await expect(response.json()).resolves.toMatchObject({
       ok: true,
       discordReady: true
+    });
+  });
+
+  it("checks the database on /health/db", async () => {
+    let checks = 0;
+    const response = await get("/health/db", async () => {
+      checks += 1;
+    });
+
+    expect(checks).toBe(1);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      databaseReady: true
+    });
+  });
+
+  it("returns 503 when the database check fails", async () => {
+    const response = await get("/health/db", async () => {
+      throw new Error("database unavailable");
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      databaseReady: false
     });
   });
 });

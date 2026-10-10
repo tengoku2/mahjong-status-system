@@ -173,7 +173,7 @@ scripts\with-node22.cmd run db:migrate:sqlite-to-postgres
 
 ## Koyeb
 
-KoyebではDockerfileを使ってWeb Serviceとしてデプロイします。起動時に `prisma migrate deploy` を実行してからBotを起動します。UptimeRobotでは `/health` を監視します。
+KoyebではDockerfileを使ってWeb Serviceとしてデプロイします。起動時に `prisma migrate deploy` を実行してからBotを起動します。Koyebの生存確認では `/health`、Aiven PostgreSQLの継続利用確認では `/health/db` を監視します。`/health/db` はアクセスごとにDBへ `SELECT 1` を実行し、接続できない場合はHTTP 503を返します。
 
 必要な環境変数:
 

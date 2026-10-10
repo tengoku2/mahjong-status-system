@@ -11,13 +11,21 @@ function fakeClient(discordReady: boolean): Client {
   } as unknown as Client;
 }
 
-async function get(path: string, checkDatabase?: () => Promise<void>) {
+async function request(path: string, method: "GET" | "HEAD", checkDatabase?: () => Promise<void>) {
   const server = createApiServer(fakeClient(true), checkDatabase);
   servers.push(server);
 
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
-  return fetch(`http://127.0.0.1:${port}${path}`);
+  return fetch(`http://127.0.0.1:${port}${path}`, { method });
+}
+
+async function get(path: string, checkDatabase?: () => Promise<void>) {
+  return request(path, "GET", checkDatabase);
+}
+
+async function head(path: string, checkDatabase?: () => Promise<void>) {
+  return request(path, "HEAD", checkDatabase);
 }
 
 afterEach(async () => {
@@ -76,5 +84,25 @@ describe("health endpoint", () => {
       ok: false,
       databaseReady: false
     });
+  });
+
+  it("checks the database and returns no body for HEAD /health/db", async () => {
+    let checks = 0;
+    const response = await head("/health/db", async () => {
+      checks += 1;
+    });
+
+    expect(checks).toBe(1);
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+  });
+
+  it("returns 503 for HEAD /health/db when the database check fails", async () => {
+    const response = await head("/health/db", async () => {
+      throw new Error("database unavailable");
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.text()).resolves.toBe("");
   });
 });

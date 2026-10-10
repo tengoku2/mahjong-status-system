@@ -622,19 +622,29 @@ export function createApiServer(client: Client, checkDatabase: DatabaseHealthChe
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
-      if (request.method === "GET" && url.pathname === "/health/db") {
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/health/db") {
         try {
           await checkDatabase();
-          sendJson(response, 200, {
-            ok: true,
-            databaseReady: true
-          });
+          if (request.method === "HEAD") {
+            response.statusCode = 200;
+            response.end();
+          } else {
+            sendJson(response, 200, {
+              ok: true,
+              databaseReady: true
+            });
+          }
         } catch (error) {
           console.error("Database health check failed.", error);
-          sendJson(response, 503, {
-            ok: false,
-            databaseReady: false
-          });
+          if (request.method === "HEAD") {
+            response.statusCode = 503;
+            response.end();
+          } else {
+            sendJson(response, 503, {
+              ok: false,
+              databaseReady: false
+            });
+          }
         }
         return;
       }

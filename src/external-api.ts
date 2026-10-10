@@ -649,14 +649,19 @@ export function createApiServer(client: Client, checkDatabase: DatabaseHealthChe
         return;
       }
 
-      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
-        sendJson(response, 200, {
-          ok: true,
-          discordReady: client.isReady(),
-          discordStatus: client.ws?.status,
-          discordPing: client.ws?.ping,
-          uptime: process.uptime()
-        });
+      if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/" || url.pathname === "/health")) {
+        if (request.method === "HEAD") {
+          response.statusCode = 200;
+          response.end();
+        } else {
+          sendJson(response, 200, {
+            ok: true,
+            discordReady: client.isReady(),
+            discordStatus: client.ws?.status,
+            discordPing: client.ws?.ping,
+            uptime: process.uptime()
+          });
+        }
         return;
       }
 

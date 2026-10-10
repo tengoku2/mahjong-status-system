@@ -60,6 +60,13 @@ describe("health endpoint", () => {
     });
   });
 
+  it.each(["/health", "/"])("returns ok with no body on HEAD %s", async (path) => {
+    const response = await head(path);
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("");
+  });
+
   it("checks the database on /health/db", async () => {
     let checks = 0;
     const response = await get("/health/db", async () => {

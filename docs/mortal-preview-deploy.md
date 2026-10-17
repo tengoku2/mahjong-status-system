@@ -1,7 +1,9 @@
 # Mortal練習ノートの試験配置
 
 入口は `https://mjs-tengoku2-a8a007d5.koyeb.app/mortal-preview/analysis/`。
-専用のHTTP Basic認証を使い、ユーザー名とパスワードをブラウザーの認証欄に入力する。
+試験表示では `MORTAL_PREVIEW_PUBLIC=true` を設定し、パスワードなしで閲覧できる。
+この設定はノート入口と元の検討HTMLすべてに適用され、URLへアクセスした誰でも閲覧できる。
+`true` を明示していない場合は、従来のHTTP Basic認証を使う。
 Discord OAuth、投稿受付、複数人集計は今回の範囲に含めない。
 試験配置は既存のFreeインスタンスの無料枠で行う。有料プランへの変更、有料ボリューム、追加サービスは使わない。
 
@@ -33,7 +35,7 @@ manifestの全ファイルのサイズ・SHA-256を検証し、圧縮・復元�
 
 Koyebの既存mjsサービスのSettingsで「Environment variables and files」を開く。
 
-1. 環境変数 `MORTAL_PREVIEW_AUTH_SHA256` に `.private/mortal-preview.env` の値を設定する。Secretからの参照も利用できる。
+1. パスワードなしの試験表示では、環境変数 `MORTAL_PREVIEW_PUBLIC` を文字列 `true` に設定する。従来の `MORTAL_PREVIEW_AUTH_SHA256` は保持できるが、公開モード中は認証に使用しない。
 2. Filesで `.private/mortal-preview.bundle.b64` を追加し、配置先を `/app/private/mortal-preview.bundle.b64`、permissionを `0600` にする。
 3. 既存の環境変数、ポート、Bot、DB、ヘルスチェック設定を保って配置する。
 
@@ -42,8 +44,8 @@ Koyebのconfig fileはruntimeで追加される。Gitからのビルドでは私
 同じサービス設定を使う再起動・再デプロイでは、config fileから同じデータを読み直す。
 別deploymentへ切り戻す場合は、そのdeploymentのconfig fileも確認する。
 
-設定不足・ファイル欠落・破損時はpreviewだけ503になり、既存のBot/API/healthの起動は妨げない。
-preview以下の全HTML・エラーパスで先に認証を要求し、許可したHTML以外は配信しない。
+ファイル欠落・破損時はpreviewだけ503になり、既存のBot/API/healthの起動は妨げない。
+公開モードでも許可したHTML以外は配信しない。公開モードを外した場合、全previewパスで先に認証を要求し、認証設定が不足していれば503にする。
 
 Koyebの公式の[config file設定手順](https://www.koyeb.com/docs/build-and-deploy/config-files)も参照。
 
@@ -53,13 +55,14 @@ Koyebの公式の[config file設定手順](https://www.koyeb.com/docs/build-and-
 scripts\with-node22.cmd test
 scripts\with-node22.cmd run build
 python C:/Users/81906/.codex/skills/mahjong-status-japanese-encoding/scripts/check_japanese_encoding.py C:/Users/81906/Documents/GitHub/mahjong-status
-scripts\with-node22.cmd run mortal:check -- --base-url https://mjs-tengoku2-a8a007d5.koyeb.app --source "C:\Users\81906\Documents\ChatGPT\mortal-reviewer\.cache\view-deploy\2ce1fc0b6c5aeb09"
+scripts\with-node22.cmd run mortal:check -- --public --base-url https://mjs-tengoku2-a8a007d5.koyeb.app --source "C:\Users\81906\Documents\ChatGPT\mortal-reviewer\.cache\view-deploy\2ce1fc0b6c5aeb09"
 ```
 
-HTTP確認は全HTMLの匿名アクセス401、認証後200、サイズとSHA-256、HEAD、
+HTTP確認は全HTMLのパスワードなしGET・HEADの200と認証要求ヘッダーがないこと、サイズとSHA-256、
 `/health` と `/health/db` のGET・HEAD、対局APIのGET拒否を検証する。
 結果は `.private/mortal-preview-verification.json` に保存する。
 対局登録APIへ試験データを書き込む確認は行わない。
+パスワード方式へ戻した場合は `--public` を外し、匿名アクセス401・認証後200を検証する。
 
 ブラウザーではrating推移・成長表示、閾値0.10/0.20/0.50、代表局面の開閉、
 手牌・副露・候補手の画像、検討HTML4件と局アンカーを確認する。
@@ -81,7 +84,8 @@ HTTP確認は全HTMLの匿名アクセス401、認証後200、サイズとSHA-25
 不具合時は、Koyebの前回正常なdeploymentを選び、そのconfig fileとともに再配置する。
 表示データだけ戻す場合は、旧スナップショットから `mortal:prepare` してconfig fileを戻す。
 コードだけ切り戻す場合もconfig fileと認証設定の組み合わせを確認する。
-閲覧停止は `MORTAL_PREVIEW_AUTH_SHA256` を外して再配置する。previewは503になる。
+パスワード方式へ戻す場合は `MORTAL_PREVIEW_PUBLIC` を `false` にして再配置する。保存済みの認証ハッシュと閲覧情報を再利用できる。
+閲覧停止は `MORTAL_PREVIEW_PUBLIC` を `false` にし、`MORTAL_PREVIEW_AUTH_SHA256` も外して再配置する。previewは503になる。
 ローカルの配置ファイルと閲覧情報は本人が安全な場所へ保管する。
 
 ## 将来案

@@ -163,3 +163,41 @@ describe("private preview integrity", () => {
     expect(() => openPreviewBundle(Buffer.from("not base64!"))).toThrow();
   });
 });
+
+describe("public Mortal preview", () => {
+  it("serves entry and linked reviews anonymously when explicitly enabled", async () => {
+    const base = await start({ publicAccess: true, bundlePath });
+    for (const [path, expected] of [["analysis/", html], ["analysis/index.html", html], [reviewPath, review]] as const) {
+      for (const method of ["GET", "HEAD"]) {
+        const response = await fetch(`${base}/mortal-preview/${path}`, { method });
+        expect(response.status).toBe(200);
+        expect(response.headers.get("www-authenticate")).toBeNull();
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
+        expect(Buffer.from(await response.arrayBuffer())).toEqual(method === "HEAD" ? Buffer.alloc(0) : expected);
+      }
+    }
+  });
+
+  it("does not ask for a password when an old verifier is still configured", async () => {
+    const base = await start({ publicAccess: true, authSha256, bundlePath });
+    const response = await fetch(`${base}/mortal-preview/analysis/`, { headers: { authorization: "Basic invalid" } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("www-authenticate")).toBeNull();
+  });
+
+  it("keeps file allowlisting, method restrictions and the existing API in public mode", async () => {
+    const base = await start({ publicAccess: true, bundlePath });
+    for (const path of ["deploy-manifest.json", "%2e%2e%2f.env", "match_data/unknown.html"]) {
+      expect((await fetch(`${base}/mortal-preview/${path}`)).status).toBe(404);
+    }
+    expect((await fetch(`${base}/mortal-preview/analysis/`, { method: "POST" })).status).toBe(405);
+    const api = await fetch(`${base}/api/matches`, { method: "POST" });
+    expect([401, 503]).toContain(api.status);
+  });
+
+  it("returns unavailable on a missing public snapshot while health remains available", async () => {
+    const base = await start({ publicAccess: true, bundlePath: join(directory, "absent.b64") });
+    expect((await fetch(`${base}/mortal-preview/analysis/`)).status).toBe(503);
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+  });
+});

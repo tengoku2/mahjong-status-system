@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { openPreviewBundle, sha256 } from "./mortal-preview-bundle.js";
 
 export interface MortalPreviewOptions {
+  publicAccess?: boolean;
   authSha256?: string;
   bundlePath?: string;
 }
@@ -22,6 +23,7 @@ const csp = [
 ].join("; ");
 
 export function createMortalPreviewHandler(options: MortalPreviewOptions = {
+  publicAccess: process.env.MORTAL_PREVIEW_PUBLIC === "true",
   authSha256: process.env.MORTAL_PREVIEW_AUTH_SHA256,
   bundlePath: process.env.MORTAL_PREVIEW_BUNDLE_PATH?.trim() || undefined
 }) {
@@ -39,7 +41,7 @@ export function createMortalPreviewHandler(options: MortalPreviewOptions = {
   return async (request: IncomingMessage, response: ServerResponse, pathname: string): Promise<boolean> => {
     if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) return false;
     response.setHeader("cache-control", "private, no-store");
-    response.setHeader("vary", "Authorization");
+    if (!options.publicAccess) response.setHeader("vary", "Authorization");
     response.setHeader("referrer-policy", "no-referrer");
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("x-frame-options", "DENY");
@@ -52,17 +54,19 @@ export function createMortalPreviewHandler(options: MortalPreviewOptions = {
       response.end(request.method === "HEAD" ? undefined : message);
       return true;
     }
-    if (!/^[a-f0-9]{64}$/i.test(options.authSha256 ?? "")) {
-      return finish(503, "Preview unavailable.");
-    }
-    const auth = request.headers.authorization;
-    const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(auth ?? "");
-    const credentials = match ? Buffer.from(match[1], "base64") : Buffer.alloc(0);
-    const actual = Buffer.from(sha256(credentials), "hex");
-    const expected = Buffer.from(options.authSha256!, "hex");
-    if (!match || !credentials.includes(58) || !timingSafeEqual(actual, expected)) {
-      response.setHeader("www-authenticate", 'Basic realm="Mortal private preview", charset="UTF-8"');
-      return finish(401, "Authentication required.");
+    if (!options.publicAccess) {
+      if (!/^[a-f0-9]{64}$/i.test(options.authSha256 ?? "")) {
+        return finish(503, "Preview unavailable.");
+      }
+      const auth = request.headers.authorization;
+      const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(auth ?? "");
+      const credentials = match ? Buffer.from(match[1], "base64") : Buffer.alloc(0);
+      const actual = Buffer.from(sha256(credentials), "hex");
+      const expected = Buffer.from(options.authSha256!, "hex");
+      if (!match || !credentials.includes(58) || !timingSafeEqual(actual, expected)) {
+        response.setHeader("www-authenticate", 'Basic realm="Mortal private preview", charset="UTF-8"');
+        return finish(401, "Authentication required.");
+      }
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       response.setHeader("allow", "GET, HEAD");

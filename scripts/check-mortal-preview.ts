@@ -32,7 +32,9 @@ for (const file of manifest.files) {
   assert.equal(response.headers.get("cache-control"), "private, no-store");
   const head = await fetch(url, { method: "HEAD", headers: { authorization }, redirect: "manual", signal: AbortSignal.timeout(60000) });
   assert.equal(head.status, 200, path);
-  assert.equal(head.headers.get("content-length"), String(file.bytes));
+  // Koyeb's edge can omit Content-Length on HEAD even when the origin sends it.
+  const headLength = head.headers.get("content-length");
+  if (headLength !== null) assert.equal(headLength, String(file.bytes));
   assert.equal((await head.arrayBuffer()).byteLength, 0);
   results.push({ path, bytes: body.length, sha256: file.sha256, anonymous: 401, authenticated: 200, head: 200 });
 }

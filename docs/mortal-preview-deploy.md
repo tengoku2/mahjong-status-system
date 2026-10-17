@@ -3,6 +3,7 @@
 入口は `https://mjs-tengoku2-a8a007d5.koyeb.app/mortal-preview/analysis/`。
 専用のHTTP Basic認証を使い、ユーザー名とパスワードをブラウザーの認証欄に入力する。
 Discord OAuth、投稿受付、複数人集計は今回の範囲に含めない。
+試験配置は既存のFreeインスタンスの無料枠で行う。有料プランへの変更、有料ボリューム、追加サービスは使わない。
 
 ## 配置するもの
 

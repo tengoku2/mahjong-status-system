@@ -6,3 +6,9 @@ prisma/*.db
 *.db
 *.db-journal
 certs/*.pem
+.private
+outputs
+.git
+.env.*
+private-assets
+private

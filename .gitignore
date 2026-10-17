@@ -6,6 +6,9 @@ dist/
 *.db-journal
 prisma/dev.db
 certs/*.pem
+.private/
+private-assets/*
+private/
 
 # TANKI licensed/private artifacts must stay local.
 samples/private/

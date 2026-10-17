@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "mortal:prepare": "tsx scripts/prepare-mortal-preview.ts",
+    "mortal:check": "tsx scripts/check-mortal-preview.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "start:prod": "node scripts/start-production.mjs",

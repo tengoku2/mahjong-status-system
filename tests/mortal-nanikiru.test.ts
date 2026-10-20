@@ -34,6 +34,8 @@ function matches(p: any, w: any = {}) {
                 return false;
             if ("lte" in v && (!p[key] || p[key] > v.lte))
                 return false;
+            if ("gt" in v && (!p[key] || p[key] <= v.gt))
+                return false;
         }
         else if (p[key] !== value)
             return false;
@@ -70,17 +72,25 @@ beforeEach(() => {
         update: vi.fn(async ({ where, data }: any) => { Object.assign(candidates.get(where.id), data); return candidates.get(where.id); }) };
     db.nanikiruGuildSetting = { findUnique: vi.fn().mockResolvedValue({ questionChannelId: "channel", resultChannelId: null }) };
     db.mortalAnswer = { upsert: vi.fn(async ({ create }: any) => { if (!answers.has(create.interactionId))
-            answers.set(create.interactionId, { ...create, createdAt: new Date() }); }), findMany: vi.fn(async ({ where }: any) => [...answers.values()].filter(p => matches(p, where)).reverse()), findFirst: vi.fn(async ({ where }: any) => [...answers.values()].find(p => matches(p, where))) };
+            answers.set(create.interactionId, { ...create, createdAt: new Date() }); }), findMany: vi.fn(async ({ where, orderBy }: any) => {
+                const rows = [...answers.values()].filter(p => matches(p, where));
+                return orderBy?.[0]?.createdAt === "asc" ? rows : rows.reverse();
+            }), findFirst: vi.fn(async ({ where }: any) => [...answers.values()].find(p => matches(p, where))) };
     db.mortalFeedback = { upsert: vi.fn(async ({ create }: any) => feedback.set(create.interactionId, create)) };
 });
 function discord() {
     const history = new Collection<string, any>();
-    const channel: any = { id: "channel", guildId: MADOROMI_GUILD_ID, isSendable: () => true, messages: { fetch: vi.fn(async (q: any) => typeof q === "string" ? history.get(q) : history) }, send: vi.fn(async (options: any) => {
-            const m = { id: `message${history.size + 1}`, author: { id: "bot" }, createdAt: new Date(), createdTimestamp: Date.now(), embeds: options.embeds.map((e: any) => e.toJSON()), components: (options.components ?? []).map((row: any) => ({components: row.toJSON().components.map((c:any)=>({customId:c.custom_id}))})), edit: vi.fn() };
+    const channel: any = { id: "channel", guildId: MADOROMI_GUILD_ID, isSendable: () => true, messages: { fetch: vi.fn(async (q: any) => typeof q === "string" ? history.get(q) : q.message ? history.get(q.message) : history) }, send: vi.fn(async (options: any) => {
+            const m: any = { id: `message${history.size + 1}`, author: { id: "bot" }, createdAt: new Date(), createdTimestamp: Date.now(), embeds: options.embeds.map((e: any) => e.toJSON()), components: (options.components ?? []).map((row: any) => ({components: row.toJSON().components.map((c:any)=>({customId:c.custom_id}))})), edit: vi.fn(async (edit: any) => {
+                m.embeds = edit.embeds.map((e: any) => e.toJSON());
+                if (edit.components) m.components = edit.components;
+                return m;
+            }) };
             history.set(m.id, m);
             return m;
         }) };
-    const client = { user: { id: "bot" }, isReady: () => true, channels: { fetch: vi.fn(async () => channel) } } as unknown as Client;
+    const members = { fetch: vi.fn(async (id: string) => ({ displayName: ({person1:"一人目",person2:"二人目"} as Record<string,string>)[id] ?? id })) };
+    const client = { user: { id: "bot" }, isReady: () => true, channels: { fetch: vi.fn(async () => channel) }, guilds: { fetch: vi.fn(async () => ({members})) } } as unknown as Client;
     return { client, channel, history };
 }
 async function reserved() {
@@ -192,7 +202,7 @@ describe("Mortal Discord delivery and privacy", () => {
         expect(embed.description).not.toContain("省略");
         expect(embed.description).not.toContain("牌を選ぶと");
         expect(embed.description).not.toContain("mjs-mortal");
-        expect(embed.footer).toBeUndefined();
+        expect(embed.footer?.text).toBe("回答数: 0 / 回答者: なし");
     });
     it("does not issue a failed post; a definitive rejection can be retried", async () => {
         const p = await reserved(), { client, channel } = discord();
@@ -236,18 +246,25 @@ describe("Mortal Discord delivery and privacy", () => {
         expect(p.issuedAt).toBeNull();
     });
     it("replies privately and records each respondent and answer revision separately", async () => {
-        const p = await reserved(), { client } = discord();
+        const p = await reserved(), { client, history } = discord();
         await deliverMortalCandidate(client, p);
-        const i: any = { customId: `mjs:mortal:a:${p.id}`, values: ["4m"], guildId: MADOROMI_GUILD_ID, message: { id: p.messageId }, user: { id: "person1" }, id: "answer1", deferReply: vi.fn(), editReply: vi.fn() };
+        const message = history.get(p.messageId!);
+        const description = message.embeds[0].description, components = message.components;
+        const i: any = { client, customId: `mjs:mortal:a:${p.id}`, values: ["4m"], guildId: MADOROMI_GUILD_ID, message: { id: p.messageId }, user: { id: "person1" }, id: "answer1", deferReply: vi.fn(), editReply: vi.fn() };
         await handleMortalAnswer(i);
         expect(i.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
         expect(i.editReply.mock.calls[0][0].content).toContain("実戦：");
         i.id = "answer2";
         i.values = ["3m"];
         await handleMortalAnswer(i);
+        expect(message.embeds[0].footer.text).toBe("回答数: 1 / 回答者: 一人目");
         i.id = "answer3";
         i.user.id = "person2";
         await handleMortalAnswer(i);
+        expect(message.embeds[0].footer.text).toBe("回答数: 2 / 回答者: 一人目, 二人目");
+        expect(message.embeds[0].description).toBe(description);
+        expect(message.components).toEqual(components);
+        expect(message.embeds[0].description).not.toContain("Mortal 最大Q値");
         expect(answers.size).toBe(3);
         expect(p.issuedAt).not.toBeNull();
         expect(answerComparison(p.data as any, "3m")).toContain("最大Q値と一致");
@@ -255,6 +272,45 @@ describe("Mortal Discord delivery and privacy", () => {
         i.customId = `mjs:mortal:f:${p.id}:simple`;
         await handleMortalFeedback(i);
         expect(feedback.size).toBe(1);
+    });
+    it("keeps successful answers private when a public edit fails, then repairs from history", async () => {
+        const p = await reserved(), { client, history } = discord();
+        await deliverMortalCandidate(client, p);
+        await processMortalQueue(client); // Cache the initial empty respondent list.
+        const message = history.get(p.messageId!);
+        const deadline = p.closesAt;
+        message.edit.mockRejectedValueOnce(new Error("Discord unavailable"));
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const i: any = { client, customId: `mjs:mortal:a:${p.id}`, values: ["3m"], guildId: MADOROMI_GUILD_ID, message, user: { id: "person1" }, id: "answer1", deferReply: vi.fn(), editReply: vi.fn() };
+            await handleMortalAnswer(i);
+            expect(answers.size).toBe(1);
+            expect(i.editReply.mock.calls[0][0].content).toContain("実戦：");
+            expect(message.embeds[0].footer.text).toContain("回答数: 0");
+            await processMortalQueue(client);
+            expect(message.embeds[0].footer.text).toBe("回答数: 1 / 回答者: 一人目");
+            expect(p.closesAt).toBe(deadline);
+            const edits = message.edit.mock.calls.length;
+            await processMortalQueue(client);
+            expect(message.edit).toHaveBeenCalledTimes(edits);
+            // Restart: no in-memory display state, but the stored answers still restore the footer.
+            message.embeds[0].footer.text = "旧表示";
+            await processMortalQueue({ ...client } as Client);
+            expect(message.embeds[0].footer.text).toBe("回答数: 1 / 回答者: 一人目");
+        } finally { log.mockRestore(); }
+    });
+    it("serializes concurrent respondent updates and keeps the list after closing", async () => {
+        const p = await reserved(), { client, history } = discord();
+        await deliverMortalCandidate(client, p);
+        const message = history.get(p.messageId!);
+        await Promise.all(["person1", "person2"].map((id, n) => handleMortalAnswer({ client, customId: `mjs:mortal:a:${p.id}`, values: [n ? "4m" : "3m"], guildId: MADOROMI_GUILD_ID, message, user: { id }, id: `answer${n}`, deferReply: vi.fn(), editReply: vi.fn() } as any)));
+        expect(message.embeds[0].footer.text).toBe("回答数: 2 / 回答者: 一人目, 二人目");
+        p.closesAt = new Date(Date.now() - 1);
+        await processMortalQueue(client);
+        expect(message.components).toEqual([]);
+        expect(message.embeds[0].footer.text).toBe("回答数: 2 / 回答者: 一人目, 二人目");
+        expect(message.embeds[0].description).toContain("回答 2人");
+        expect(message.embeds[0].description).not.toContain("実戦：");
     });
     it("rejects expired answers, closes after restart and shows only the public distribution", async () => {
         const p = await reserved(), { client, history } = discord();

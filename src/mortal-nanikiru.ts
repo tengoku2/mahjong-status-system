@@ -80,7 +80,18 @@ export async function selectMortalManually(requestId: string, mode: "latest" | "
     }, { timeout: 30000 });
     return batchId;
 }
-export function problemEmbed(p: MortalCandidate, closed = false, distribution?: string) {
+export function mortalAnswerStatus(names: string[]) {
+    const text = `回答数: ${names.length} / 回答者: ${names.length ? names.join(", ") : "なし"}`;
+    return text.length <= 1600 ? text : `${text.slice(0, 1597)}...`;
+}
+async function answerNames(client: Client, answers: { userId: string }[]) {
+    const guild = await client.guilds.fetch(MADOROMI_GUILD_ID).catch(() => null);
+    return Promise.all([...new Set(answers.map(a => a.userId))].map(async id => {
+        const member = await guild?.members.fetch(id).catch(() => null);
+        return member?.displayName ?? `User-${id.slice(-4)}`;
+    }));
+}
+export function problemEmbed(p: MortalCandidate, closed = false, distribution?: string, names: string[] = []) {
     const d = asData(p);
     const description = [
         `${d.round} / ${d.turn === null ? "巡目不明" : `${d.turn}巡目`}${/[東南西北]([1-4])局/.test(d.round) ? ` / ${["東家", "南家", "西家", "北家"][(d.seat - Number(/[東南西北]([1-4])局/.exec(d.round)![1]) + 5) % 4]}` : ""}`,
@@ -91,7 +102,7 @@ export function problemEmbed(p: MortalCandidate, closed = false, distribution?: 
         closed ? "回答受付を締め切りました。" : "",
         distribution ?? ""
     ].filter(Boolean).join("\n");
-    return new EmbedBuilder().setTitle("実戦からの何切る").setDescription(description);
+    return new EmbedBuilder().setTitle("実戦からの何切る").setDescription(description).setFooter({ text: mortalAnswerStatus(names) });
 }
 export function answerMenu(p: MortalCandidate) {
     return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
@@ -117,6 +128,43 @@ async function channelFor(client: Client, id: string): Promise<SendableChannels>
     if (!channel || !("guildId" in channel) || channel.guildId !== MADOROMI_GUILD_ID || !channel.isSendable())
         throw new Error("まどろみの送信可能な何切るチャンネルを設定してください。");
     return channel;
+}
+const displayStates = new WeakMap<Client, { locks: Map<string, Promise<void>>; synced: Map<string, string> }>();
+function displayState(client: Client) {
+    let state = displayStates.get(client);
+    if (!state) {
+        state = { locks: new Map(), synced: new Map() };
+        displayStates.set(client, state);
+    }
+    return state;
+}
+async function withDisplayLock(client: Client, id: string, render: () => Promise<void>) {
+    const locks = displayState(client).locks;
+    const previous = locks.get(id) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(render);
+    locks.set(id, next);
+    try { await next; }
+    finally { if (locks.get(id) === next) locks.delete(id); }
+}
+async function refreshAnswerDisplay(client: Client, id: string, force = false) {
+    await withDisplayLock(client, id, async () => {
+        const synced = displayState(client).synced;
+        if (force) synced.delete(id);
+        const p = await prisma.mortalCandidate.findUnique({ where: { id } });
+        if (!p?.messageId || !p.channelId || p.closedAt || !p.closesAt || p.closesAt <= new Date()) return;
+        const answers = await prisma.mortalAnswer.findMany({ where: { candidateId: id }, orderBy: [{ createdAt: "asc" }, { interactionId: "asc" }] });
+        const signature = JSON.stringify([...new Set(answers.map(a => a.userId))]);
+        if (synced.get(id) === signature) return;
+        const names = await answerNames(client, answers);
+        const channel = await channelFor(client, p.channelId);
+        const message = await channel.messages.fetch({ message: p.messageId, force: true });
+        if (message.author.id !== client.user?.id || !message.embeds[0]) throw new Error("Question message is unavailable.");
+        const text = mortalAnswerStatus(names);
+        if (message.embeds[0].footer?.text !== text)
+            await message.edit({ embeds: [EmbedBuilder.from(message.embeds[0]).setFooter({ text })], allowedMentions: { parse: [] } });
+        // A failed edit is retried by the queue, including after a restart.
+        synced.set(id, signature);
+    });
 }
 async function markIssued(p: MortalCandidate, message: Message) {
     await prisma.mortalCandidate.update({ where: { id: p.id }, data: { delivery: "confirmed", messageId: message.id, issuedAt: message.createdAt, closesAt: new Date(message.createdTimestamp + 24 * 3600 * 1000) } });
@@ -189,6 +237,7 @@ async function closeProblem(client: Client, p: MortalCandidate) {
         return;
     await prisma.mortalCandidate.updateMany({ where: { id: p.id, closedAt: null }, data: { closedAt: new Date() } });
     const answers = await prisma.mortalAnswer.findMany({ where: { candidateId: p.id }, orderBy: [{ createdAt: "desc" }, { interactionId: "desc" }] });
+    const names = await answerNames(client, [...answers].reverse());
     const latest = new Map<string, string>();
     for (const a of answers)
         if (!latest.has(a.userId))
@@ -204,7 +253,7 @@ async function closeProblem(client: Client, p: MortalCandidate) {
         throw e;
     });
     if (message)
-        await message.edit({ embeds: [problemEmbed(p, true, distribution)], components: [] });
+        await message.edit({ embeds: [problemEmbed(p, true, distribution, names)], components: [], allowedMentions: { parse: [] } });
     if (p.resultChannelId && p.resultChannelId !== p.channelId && !p.resultMessageId) {
         const resultMarker = `${marker(p.id)}:result`;
         const resultLink = `https://discord.com/channels/${MADOROMI_GUILD_ID}/${p.channelId}/${p.messageId}`;
@@ -221,7 +270,7 @@ async function closeProblem(client: Client, p: MortalCandidate) {
                 return;
             let result: Message;
             try {
-                result = await resultChannel.send({ embeds: [new EmbedBuilder().setTitle("実戦何切る：回答結果").setDescription(`${distribution}\n[問題を見る](${resultLink})`)], allowedMentions: { parse: [] }, nonce: hashId(resultMarker).slice(0, 25), enforceNonce: true });
+                result = await resultChannel.send({ embeds: [new EmbedBuilder().setTitle("実戦何切る：回答結果").setDescription(`${distribution}\n[問題を見る](${resultLink})`).setFooter({ text: mortalAnswerStatus(names) })], allowedMentions: { parse: [] }, nonce: hashId(resultMarker).slice(0, 25), enforceNonce: true });
             }
             catch (error) {
                 const status = typeof error === "object" && error !== null && "status" in error ? Number(error.status) : 0;
@@ -231,7 +280,8 @@ async function closeProblem(client: Client, p: MortalCandidate) {
             await prisma.mortalCandidate.update({ where: { id: p.id }, data: { resultDelivery: "confirmed", resultMessageId: result.id } });
         }
     }
-    // The public result contains only the distribution, never Mortal/actual choices.
+    displayState(client).synced.delete(p.id);
+    // Respondent names are separate from choices; Mortal/actual choices stay private.
     await prisma.mortalCandidate.update({ where: { id: p.id }, data: { closeSynced: true } });
 }
 export async function processMortalQueue(client: Client) {
@@ -248,11 +298,15 @@ export async function processMortalQueue(client: Client) {
     const closed = await prisma.mortalCandidate.findMany({ where: { closesAt: { lte: new Date() }, closeSynced: false }, take: 100 });
     for (const p of closed)
         try {
-            await closeProblem(client, p);
+            await withDisplayLock(client, p.id, () => closeProblem(client, p));
         }
         catch {
             console.error("Mortal close pending; candidate", p.id);
         }
+    const open = await prisma.mortalCandidate.findMany({ where: { issuedAt: { not: null }, closedAt: null, closesAt: { gt: new Date() } }, take: 100 });
+    for (const p of open)
+        try { await refreshAnswerDisplay(client, p.id); }
+        catch { console.error("Mortal respondent display pending; candidate", p.id); }
 }
 export function startMortalQueue(client: Client) {
     let running = false;
@@ -303,6 +357,8 @@ export async function handleMortalAnswer(interaction: StringSelectMenuInteractio
         return p;
     });
     await interaction.editReply({ content: answerComparison(asData(problem), tile), components: [feedbackButtons(id)], allowedMentions: { parse: [] } });
+    try { await refreshAnswerDisplay(interaction.client, id, true); }
+    catch { console.error("Mortal respondent display pending; candidate", id); }
 }
 export async function handleMortalFeedback(interaction: ButtonInteraction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });

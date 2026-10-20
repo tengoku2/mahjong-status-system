@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { Prisma } from "@prisma/client";
 import { REST, Routes } from "discord.js";
-import type { APIMessage } from "discord.js";
+import type { APIGuildMember, APIMessage } from "discord.js";
 import { prisma } from "../src/prisma.js";
 import { hashId, parseImport } from "../src/mortal-nanikiru-domain.js";
-import { problemEmbed } from "../src/mortal-nanikiru.js";
+import { mortalAnswerStatus, problemEmbed } from "../src/mortal-nanikiru.js";
 import { MADOROMI_GUILD_ID } from "../src/guild-rules.js";
 
 const apply = process.argv.includes("--apply");
@@ -48,11 +48,16 @@ try {
       await writeFile(`.private/mortal-nanikiru-message-${p.id}-before.json`,JSON.stringify(message,null,2),{encoding:"utf8",flag:"wx"}).catch(e=>{if(e.code!=="EEXIST")throw e;});
       const closed=Boolean(p.closedAt || p.closesAt && p.closesAt<=new Date());
       const distribution=closed?message.embeds[0]?.description?.match(/回答 \d+人[\s\S]*/)?.[0]:undefined;
-      await rest.patch(Routes.channelMessage(p.channelId!,p.messageId!),{body:{embeds:[problemEmbed(p,closed,distribution).toJSON()],allowed_mentions:{parse:[]}}});
+      const answers=await prisma.mortalAnswer.findMany({where:{candidateId:p.id},orderBy:[{createdAt:"asc"},{interactionId:"asc"}]});
+      const names=await Promise.all([...new Set(answers.map(a=>a.userId))].map(async id=>{
+        const member=await rest.get(Routes.guildMember(MADOROMI_GUILD_ID,id)).catch(()=>null) as APIGuildMember|null;
+        return member?.nick??member?.user?.global_name??member?.user?.username??`User-${id.slice(-4)}`;
+      }));
+      await rest.patch(Routes.channelMessage(p.channelId!,p.messageId!),{body:{embeds:[problemEmbed(p,closed,distribution,names).toJSON()],allowed_mentions:{parse:[]}}});
       if(p.resultMessageId && p.resultChannelId){
         const result=await rest.get(Routes.channelMessage(p.resultChannelId,p.resultMessageId)) as APIMessage;
         assert.equal(result.author.id,self.id);
-        await rest.patch(Routes.channelMessage(p.resultChannelId,p.resultMessageId),{body:{embeds:result.embeds.map(({footer,...embed})=>embed),allowed_mentions:{parse:[]}}});
+        await rest.patch(Routes.channelMessage(p.resultChannelId,p.resultMessageId),{body:{embeds:result.embeds.map(embed=>({...embed,footer:{text:mortalAnswerStatus(names)}})),allowed_mentions:{parse:[]}}});
       }
       edited++;
     }

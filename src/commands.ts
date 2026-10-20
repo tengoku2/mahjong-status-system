@@ -307,9 +307,8 @@ export const mjsCommand = new SlashCommandBuilder()
   .addSubcommand((command) => addNanikiruOptions(command.setName("nanikiru").setDescription("何切る問題を出題します")))
   .addSubcommand((command) => addNanikiruConfigOptions(command.setName("nanikiru_config").setDescription("何切る問題の設定先を保存します")))
   .addSubcommand((command) => command.setName("mortal_nanikiru").setDescription("実戦からの何切るを手動で出題・再開します")
-    .addStringOption(option => option.setName("mode").setDescription("出題する範囲").setRequired(true).addChoices(
-      {name:"最新半荘の未出題から最大3問",value:"latest"},
-      {name:"直近7日間の未出題から最大3問",value:"past"},
+    .addStringOption(option => option.setName("mode").setDescription("省略で直近3日間、候補がなければ最新半荘から出題").addChoices(
+      {name:"直近3日間、なければ最新半荘から最大3問",value:"request"},
       {name:"保存済みセットの投稿・履歴照合を再開",value:"retry"})))
   .addSubcommand((command) =>
     command

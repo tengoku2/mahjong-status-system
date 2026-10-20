@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { calculateShanten, formatNanikiruHand, tileLabel } from "./nanikiru.js";
 export const MORTAL_RULE_VERSION = "shape-1.0.0";
-export const WEEK_MS = 168 * 60 * 60 * 1000;
+export const RECENT_MS = 72 * 60 * 60 * 1000;
 export const hashId = (value: string) => createHash("sha256").update(value).digest("hex");
 const honors = ["e", "s", "w", "n", "p", "f", "c"];
 export function tileNumber(code: string): number {
@@ -248,7 +248,7 @@ export function classifyDecision(d: DecisionInput): ProblemData | null {
         best: metrics.filter(m => m.q === maxQ).map(m => m.tile), actualTile: d.actual.slice(2), reason, metrics, ruleVersion: MORTAL_RULE_VERSION };
 }
 export function inWindow(playedAt: Date | null, now: Date): boolean {
-    return playedAt !== null && playedAt.getTime() >= now.getTime() - WEEK_MS && playedAt <= now;
+    return playedAt !== null && playedAt.getTime() >= now.getTime() - RECENT_MS && playedAt <= now;
 }
 export function rankCandidates<T extends {
     id: string;

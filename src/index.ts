@@ -1846,7 +1846,7 @@ async function handleHelp(interaction: ChatInputCommandInteraction) {
     "`/mjs export` CSVを出力",
     "`/mjs nanikiru` 何切る問題を出題",
     "`/mjs nanikiru_config` 何切るの投稿先を設定",
-    "`/mjs mortal_nanikiru` 実戦の何切るを最新半荘・直近7日間から手動出題（まどろみ運営）",
+    "`/mjs mortal_nanikiru` 直近3日間、候補がなければ最新半荘から最大3問を出題（まどろみ運営）",
     "`/mjs log` ユーザー別の対局履歴を表示",
     "`/mjs matches` サーバー全体の対局一覧を表示",
     "`/mjs del` 指定した対局を削除",

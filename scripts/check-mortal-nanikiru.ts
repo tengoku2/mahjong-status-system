@@ -29,19 +29,23 @@ try {
     })) };
   }
   const input={baseline:false,reviews:[review("a",3,[1.2,.95,.6]),review("b",1,[.9,.8,.4]),review("c",0,[.75,.65,.5])]};
-  const [first,second]=await Promise.all([registerMortalImport(input,now),registerMortalImport(input,now)]);
+  const [first,second]=await Promise.all([registerMortalImport(input),registerMortalImport(input)]);
   assert.equal(first.batchId,second.batchId);
   assert.equal(await prisma.mortalCandidate.count(),9);
-  const issued=await prisma.mortalCandidate.findMany({where:{batchId:first.batchId},orderBy:{gap:"desc"}});
-  assert.deepEqual(issued.map(c=>c.gap),[.75,.65,.5]);
-  const past=await selectMortalManually("synthetic-request","past",now);
-  assert.deepEqual((await prisma.mortalCandidate.findMany({where:{batchId:past},orderBy:{gap:"desc"}})).map(c=>c.gap),[1.2,.95,.9]);
+  assert.equal(await prisma.mortalCandidate.count({where:{batchId:{not:null}}}),0);
+  const [requested,repeated]=await Promise.all([selectMortalManually("synthetic-request",now),selectMortalManually("synthetic-request",now)]);
+  assert.equal(requested,repeated);
+  const issued=await prisma.mortalCandidate.findMany({where:{batchId:requested},orderBy:{gap:"desc"}});
+  assert.deepEqual(issued.map(c=>c.gap),[1.2,.95,.9]);
   await prisma.mortalCandidate.update({where:{id:issued[0].id},data:{issuedAt:now,messageId:"synthetic-message",closesAt:new Date(now.getTime()+86400000)}});
   for(const [interactionId,tile] of [["synthetic-answer1","4m"],["synthetic-answer2","3m"]]) await prisma.mortalAnswer.create({data:{interactionId,candidateId:issued[0].id,userId:"synthetic-user",tile}});
-  await registerMortalImport(input,now);
+  await registerMortalImport(input);
   assert.equal(await prisma.mortalAnswer.count(),2);
   assert.equal((await prisma.mortalCandidate.findUniqueOrThrow({where:{id:issued[0].id}})).messageId,"synthetic-message");
-  console.log("PostgreSQL integration passed: migration, locking, concurrent import, latest/past selection and history.");
+  const fallback=await selectMortalManually("synthetic-fallback",new Date(now.getTime()+10*86400000));
+  assert.deepEqual((await prisma.mortalCandidate.findMany({where:{batchId:fallback},orderBy:{gap:"desc"}})).map(c=>c.gap),[.75,.65,.5]);
+  assert.equal(await prisma.mortalCandidate.count({where:{batch:{mode:"request"},issuedAt:null}}),5);
+  console.log("PostgreSQL integration passed: import without posts, concurrent requests, 72-hour selection, old latest fallback and history.");
 } finally {
   await testClient?.$disconnect();
   if(created)await admin.$executeRawUnsafe(`DROP SCHEMA "${schema}" CASCADE`);

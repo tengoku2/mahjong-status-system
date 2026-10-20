@@ -5,8 +5,8 @@ import { Collection, MessageFlags, type Client } from "discord.js";
 import type { MortalCandidate } from "@prisma/client";
 const { db } = vi.hoisted(() => ({ db: {} as any }));
 vi.mock("../src/prisma.js", () => ({ prisma: db }));
-import { answerComparison, answerMenu, deliverMortalCandidate, handleMortalAnswer, handleMortalFeedback, problemEmbed, processMortalQueue, registerMortalImport, selectMortalManually } from "../src/mortal-nanikiru.js";
-import { classifyDecision, formatMortalTiles, inWindow, parseImport, shapeCounts, tileNumber, WEEK_MS, type DecisionInput } from "../src/mortal-nanikiru-domain.js";
+import { answerComparison, answerMenu, deliverMortalCandidate, handleMortalAnswer, handleMortalCommand, handleMortalFeedback, problemEmbed, processMortalQueue, registerMortalImport, selectMortalManually } from "../src/mortal-nanikiru.js";
+import { classifyDecision, formatMortalTiles, inWindow, parseImport, shapeCounts, tileNumber, RECENT_MS, type DecisionInput } from "../src/mortal-nanikiru-domain.js";
 import { MADOROMI_GUILD_ID } from "../src/guild-rules.js";
 const now = new Date("2026-10-20T12:00:00+09:00");
 function decision(gap = 0, entry = 1): DecisionInput {
@@ -26,6 +26,9 @@ function matches(p: any, w: any = {}) {
             if (!date || date < range.gte || date > range.lte)
                 return false;
         }
+        else if (key === "batch") {
+            if (!p.batchId || !matches(batches.get(p.batchId), value)) return false;
+        }
         else if (value && typeof value === "object" && !(value instanceof Date)) {
             const v = value as any;
             if ("in" in v && !v.in.includes(p[key]))
@@ -35,6 +38,8 @@ function matches(p: any, w: any = {}) {
             if ("lte" in v && (!p[key] || p[key] > v.lte))
                 return false;
             if ("gt" in v && (!p[key] || p[key] <= v.gt))
+                return false;
+            if ("gte" in v && (!p[key] || p[key] < v.gte))
                 return false;
         }
         else if (p[key] !== value)
@@ -58,7 +63,7 @@ beforeEach(() => {
     db.$queryRaw = vi.fn().mockResolvedValue([]);
     db.mortalBatch = { findUnique: vi.fn(async ({ where }: any) => batches.get(where.id) ?? null), create: vi.fn(async ({ data }: any) => { batches.set(data.id, data); return data; }) };
     db.mortalReview = { findUnique: vi.fn(async ({ where }: any) => reviews.get(where.id) ?? null), findUniqueOrThrow: vi.fn(async ({ where }: any) => reviews.get(where.id)),
-        findMany: vi.fn(async () => [...reviews.values()]), findFirst: vi.fn(async () => [...reviews.values()].filter(r => r.playedAt).sort((a, b) => b.playedAt - a.playedAt)[0] ?? null),
+        findMany: vi.fn(async () => [...reviews.values()]), findFirst: vi.fn(async ({where}: any) => [...reviews.values()].filter(r => matches(r,where)).sort((a, b) => b.playedAt - a.playedAt || a.id.localeCompare(b.id))[0] ?? null),
         create: vi.fn(async ({ data }: any) => { reviews.set(data.id, data); return data; }) };
     db.mortalCandidate = { createMany: vi.fn(async ({ data }: any) => { for (const p of data)
             candidates.set(p.id, { ...p, batchId: null, delivery: "ready", issuedAt: null, attemptAt: null, messageId: null, channelId: null, closedAt: null, closesAt: null, closeSynced: false, resultChannelId: null, resultDelivery: "ready", resultMessageId: null, resultAttemptAt: null }); }),
@@ -97,6 +102,7 @@ async function reserved() {
     const r = review("a", 0, [.1]);
     r.playedAt = new Date().toISOString();
     await registerMortalImport({ baseline: false, reviews: [r] });
+    await selectMortalManually("request");
     return [...candidates.values()][0] as MortalCandidate;
 }
 describe("Mortal candidate rules", () => {
@@ -132,50 +138,76 @@ describe("Mortal candidate rules", () => {
         expect(parseImport({ baseline: true, reviews: [{ ...review("a", 0, []), decisions: [red] }] }).reviews[0].decisions[0].hand).toContain("5pr");
         expect(tileNumber("5pr")).toBe(tileNumber("5p"));
     });
-    it("uses an inclusive 168-hour actual-game window", () => {
-        expect(inWindow(new Date(now.getTime() - WEEK_MS), now)).toBe(true);
-        expect(inWindow(new Date(now.getTime() - WEEK_MS - 1), now)).toBe(false);
+    it("uses an inclusive 72-hour actual-game window", () => {
+        expect(inWindow(new Date(now.getTime() - RECENT_MS), now)).toBe(true);
+        expect(inWindow(new Date(now.getTime() - RECENT_MS - 1), now)).toBe(false);
         expect(inWindow(new Date(now.getTime() + 1), now)).toBe(false);
         expect(inWindow(null, now)).toBe(false);
     });
 });
 describe("Mortal persistent selection", () => {
-    it("uses only the newest newly imported game, then ranks past unissued across games", async () => {
-        const input = { baseline: false, reviews: [review("a", 3, [1.2, .95, .6]), review("b", 1, [.9, .8, .4]), review("c", 0, [.75, .65, .5])] };
-        const first = await registerMortalImport(input, now);
-        const selected = () => [...candidates.values()].filter(c => c.batchId === first.batchId);
-        expect(selected().map(c => c.gap).sort()).toEqual([.5, .65, .75]);
-        const past = await selectMortalManually("manual1", "past", now);
-        expect([...candidates.values()].filter(c => c.batchId === past).map(c => c.gap).sort()).toEqual([.9, .95, 1.2]);
+    it("imports many games without posting, then selects at most three across the last 72 hours on request", async () => {
+        const input = { baseline: false, reviews: [review("a", 3, [1.2, .95, .6]), review("b", 1, [.9, .8, .4]), review("c", 0, [.75, .65, .5]), review("d", 3+1/86400000, [10])] };
+        await registerMortalImport(input);
+        const {client,channel}=discord();
+        await processMortalQueue(client);
+        expect(channel.send).not.toHaveBeenCalled();
+        expect([...candidates.values()].some(c=>c.batchId)).toBe(false);
+        const batch = await selectMortalManually("manual1", now);
+        expect([...candidates.values()].filter(c => c.batchId === batch).map(c => c.gap).sort()).toEqual([.9, .95, 1.2]);
         expect([...candidates.values()].every(c => c.issuedAt === null)).toBe(true);
     });
-    it("does not refill a short latest game from older candidates", async () => {
-        const result = await registerMortalImport({ baseline: false, reviews: [review("a", 1, [3, 2, 1]), review("b", 0, [.2, .1])] }, now);
-        expect([...candidates.values()].filter(c => c.batchId === result.batchId)).toHaveLength(2);
+    it("does not refill a short recent pool from older games", async () => {
+        await registerMortalImport({ baseline: false, reviews: [review("a", 4, [3, 2, 1]), review("b", 0, [.2, .1])] });
+        const batch=await selectMortalManually("short",now);
+        expect([...candidates.values()].filter(c => c.batchId === batch)).toHaveLength(2);
     });
-    it("an empty latest game does not borrow older candidates", async () => {
-        const result = await registerMortalImport({ baseline: false, reviews: [review("a", 1, [1]), review("b", 0, [])] }, now);
-        expect([...candidates.values()].filter(c => c.batchId === result.batchId)).toHaveLength(0);
+    it("falls back to only the latest game even beyond seven days, excluding future games", async () => {
+        await registerMortalImport({ baseline: false, reviews: [review("a", 9, [5,4]), review("b", 8, [.2,.1]), review("c", -1, [10])] });
+        const batch=await selectMortalManually("fallback",now);
+        expect([...candidates.values()].filter(c => c.batchId === batch).map(c=>c.gap).sort()).toEqual([.1,.2]);
+    });
+    it("does not borrow older games when the fallback latest game has no candidates", async () => {
+        await registerMortalImport({ baseline: false, reviews: [review("a", 9, [1]), review("b", 8, [])] });
+        const batch=await selectMortalManually("empty",now);
+        expect([...candidates.values()].filter(c => c.batchId === batch)).toHaveLength(0);
     });
     it("reimports, filename-free identities and concurrent imports preserve the frozen set", async () => {
         const input = { baseline: false, reviews: [review("a", 0, [.5, .4, .3, .2])] };
-        const results = await Promise.all([registerMortalImport(input, now), registerMortalImport(input, now)]);
+        const results = await Promise.all([registerMortalImport(input), registerMortalImport(input)]);
         expect(new Set(results.map(r => r.batchId)).size).toBe(1);
         expect(candidates.size).toBe(4);
-        expect([...candidates.values()].filter(c => c.batchId)).toHaveLength(3);
-        await registerMortalImport(input, now);
-        expect(batches.size).toBe(1);
+        expect([...candidates.values()].filter(c => c.batchId)).toHaveLength(0);
+        const [first,second]=await Promise.all([selectMortalManually("same",now),selectMortalManually("same",now)]);
+        expect(first).toBe(second);
+        expect([...candidates.values()].filter(c=>c.batchId===first)).toHaveLength(3);
+        await registerMortalImport(input);
+        expect(batches.size).toBe(2);
+        const next=await selectMortalManually("next",now);
+        expect([...candidates.values()].filter(c=>c.batchId===next)).toHaveLength(1);
     });
-    it("baselines retain all candidates without posting; expiry retains history", async () => {
-        await registerMortalImport({ baseline: true, reviews: [review("a", 8, [2]), review("b", 0, [1])] }, now);
+    it("baselines retain all candidates without posting; manual requests preserve old history", async () => {
+        await registerMortalImport({ baseline: true, reviews: [review("a", 8, [2]), review("b", 0, [1])] });
         expect(candidates.size).toBe(2);
         expect([...candidates.values()].some(c => c.batchId)).toBe(false);
-        await selectMortalManually("past", "past", now);
+        await selectMortalManually("request", now);
         expect([...candidates.values()].filter(c => c.batchId)).toHaveLength(1);
         expect(candidates.size).toBe(2);
     });
 });
 describe("Mortal Discord delivery and privacy", () => {
+    it("posts only three on an explicit command with no mode option", async () => {
+        const r=review("a",0,[.5,.4,.3,.2]);
+        r.playedAt=new Date().toISOString();
+        await registerMortalImport({baseline:false,reviews:[r]});
+        const {client,channel}=discord();
+        const i:any={id:"manual-command",guildId:MADOROMI_GUILD_ID,options:{getString:vi.fn(()=>null)},deferReply:vi.fn(),editReply:vi.fn()};
+        await handleMortalCommand(i,client,true);
+        expect(channel.send).toHaveBeenCalledTimes(3);
+        expect(i.editReply.mock.calls[0][0]).toContain("3問を投稿済み");
+        await handleMortalCommand(i,client,true);
+        expect(channel.send).toHaveBeenCalledTimes(3);
+    });
     it("marks only a successful post as issued and never leaks Q ordering in choices", async () => {
         const p = await reserved(), { client, channel } = discord();
         await deliverMortalCandidate(client, p);
@@ -236,14 +268,22 @@ describe("Mortal Discord delivery and privacy", () => {
         await Promise.all([deliverMortalCandidate(client, p), deliverMortalCandidate(client, p)]);
         expect(channel.send).toHaveBeenCalledTimes(1);
     });
-    it("preserves an expired reservation without posting", async () => {
+    it("delivers an explicitly requested fallback even when its game is old", async () => {
         const p = await reserved(), { client, channel } = discord();
-        reviews.get(p.reviewId).playedAt = new Date(Date.now() - WEEK_MS - 1);
+        reviews.get(p.reviewId).playedAt = new Date(Date.now() - 10*86400000);
         await deliverMortalCandidate(client, p);
-        expect(channel.send).not.toHaveBeenCalled();
-        expect(p.delivery).toBe("expired");
+        expect(channel.send).toHaveBeenCalledTimes(1);
         expect(p.batchId).toBeTruthy();
+        expect(p.issuedAt).not.toBeNull();
+    });
+    it("never posts a legacy automatic reservation, including after restart", async () => {
+        const p = await reserved(), { client, channel } = discord();
+        batches.get(p.batchId!).mode="latest";
+        await deliverMortalCandidate(client,p);
+        await processMortalQueue(client);
+        expect(channel.send).not.toHaveBeenCalled();
         expect(p.issuedAt).toBeNull();
+        expect(p.delivery).toBe("ready");
     });
     it("replies privately and records each respondent and answer revision separately", async () => {
         const p = await reserved(), { client, history } = discord();

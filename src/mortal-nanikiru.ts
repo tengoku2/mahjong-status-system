@@ -5,13 +5,13 @@ import { Prisma, type MortalCandidate } from "@prisma/client";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, type ChatInputCommandInteraction, type Client, type Message, type SendableChannels, type StringSelectMenuInteraction, type ButtonInteraction } from "discord.js";
 import { MADOROMI_GUILD_ID } from "./guild-rules.js";
 import { prisma } from "./prisma.js";
-import { classifyDecision, codeLabel, formatMortalTiles, hashId, inWindow, MORTAL_RULE_VERSION, parseImport, rankCandidates, tileNumber, type ImportInput, type ProblemData } from "./mortal-nanikiru-domain.js";
+import { classifyDecision, codeLabel, formatMortalTiles, hashId, MORTAL_RULE_VERSION, parseImport, rankCandidates, RECENT_MS, tileNumber, type ImportInput, type ProblemData } from "./mortal-nanikiru-domain.js";
 const LOCK = "mjs:mortal-nanikiru:primary";
 const marker = (id: string) => `mjs-mortal:${id}`;
 const asData = (p: MortalCandidate) => p.data as unknown as ProblemData;
 const jsonData = (p: ProblemData) => p as unknown as Prisma.InputJsonValue;
 const batchIdFor = (input: ImportInput) => hashId(`${input.baseline ? "baseline" : "import"}:${input.reviews.map(r => r.id).sort().join(":")}`);
-export async function registerMortalImport(input: ImportInput, now = new Date()) {
+export async function registerMortalImport(input: ImportInput) {
     const batchId = batchIdFor(input);
     if (await prisma.mortalBatch.findUnique({ where: { id: batchId } }))
         return { batchId, duplicate: true, addedReviews: 0 };
@@ -52,31 +52,28 @@ export async function registerMortalImport(input: ImportInput, now = new Date())
             if (r.candidates.length)
                 await tx.mortalCandidate.createMany({ data: r.candidates.map(c => ({ id: c.id, reviewId: r.id, gap: c.data!.gap, data: jsonData(c.data!), ruleVersion: MORTAL_RULE_VERSION })) });
         }
-        await tx.mortalBatch.create({ data: { id: batchId, mode: input.baseline ? "baseline" : "latest" } });
-        const latest = [...added].filter(r => r.playedAt !== null).sort((a, b) => b.playedAt!.getTime() - a.playedAt!.getTime() || a.id.localeCompare(b.id))[0];
-        if (!input.baseline && latest && inWindow(latest.playedAt, now))
-            await reserve(tx, batchId, latest.id, now);
+        // Importing any number of games only stores candidates. Posting requires a request.
+        await tx.mortalBatch.create({ data: { id: batchId, mode: input.baseline ? "baseline" : "import" } });
         return { batchId, duplicate: false, addedReviews: added.length };
     }, { timeout: 60000 });
 }
-async function reserve(tx: Prisma.TransactionClient, batchId: string, reviewId: string | undefined, now: Date) {
-    const candidates = await tx.mortalCandidate.findMany({ where: { batchId: null, issuedAt: null,
-            reviewId, review: { playedAt: { gte: new Date(now.getTime() - 168 * 3600 * 1000), lte: now } } }, include: { review: true } });
-    const selected = rankCandidates(candidates.map(c => ({ ...c, playedAt: c.review.playedAt }))).slice(0, 3);
-    if (selected.length)
-        await tx.mortalCandidate.updateMany({ where: { id: { in: selected.map(c => c.id) }, batchId: null }, data: { batchId } });
-}
-export async function selectMortalManually(requestId: string, mode: "latest" | "past", now = new Date()) {
+export async function selectMortalManually(requestId: string, now = new Date()) {
     const batchId = hashId(`manual:${requestId}`);
     await prisma.$transaction(async (tx) => {
         await tx.$queryRaw `SELECT pg_advisory_xact_lock(hashtext(${LOCK}))::text`;
         if (await tx.mortalBatch.findUnique({ where: { id: batchId } }))
             return;
-        await tx.mortalBatch.create({ data: { id: batchId, mode } });
-        const latest = mode === "latest" ? await tx.mortalReview.findFirst({ where: { playedAt: { not: null } }, orderBy: [{ playedAt: "desc" }, { id: "asc" }] }) : null;
-        if (mode === "latest" && (!latest || !inWindow(latest.playedAt, now)))
-            return;
-        await reserve(tx, batchId, latest?.id, now);
+        await tx.mortalBatch.create({ data: { id: batchId, mode: "request" } });
+        let candidates = await tx.mortalCandidate.findMany({ where: { batchId: null, issuedAt: null,
+                review: { playedAt: { gte: new Date(now.getTime() - RECENT_MS), lte: now } } }, include: { review: true } });
+        if (!candidates.length) {
+            const latest = await tx.mortalReview.findFirst({ where: { playedAt: { not: null, lte: now } }, orderBy: [{ playedAt: "desc" }, { id: "asc" }] });
+            if (latest)
+                candidates = await tx.mortalCandidate.findMany({ where: { batchId: null, issuedAt: null, reviewId: latest.id }, include: { review: true } });
+        }
+        const selected = rankCandidates(candidates.map(c => ({ ...c, playedAt: c.review.playedAt }))).slice(0, 3);
+        if (selected.length)
+            await tx.mortalCandidate.updateMany({ where: { id: { in: selected.map(c => c.id) }, batchId: null, issuedAt: null }, data: { batchId } });
     }, { timeout: 30000 });
     return batchId;
 }
@@ -200,14 +197,12 @@ async function findSentMessage(client: Client, channelId: string, attemptAt: Dat
 export async function deliverMortalCandidate(client: Client, p: MortalCandidate) {
     if (p.issuedAt)
         return;
+    const batch = p.batchId ? await prisma.mortalBatch.findUnique({ where: { id: p.batchId } }) : null;
+    // Legacy automatic reservations remain in history, but cannot post after the switch.
+    if (batch?.mode !== "request")
+        return;
     if (p.delivery !== "ready") {
         await reconcile(client, p);
-        return;
-    }
-    const review = await prisma.mortalReview.findUniqueOrThrow({ where: { id: p.reviewId } });
-    if (!inWindow(review.playedAt, new Date())) {
-        // Keep the frozen batch and candidate; expiry is not an issued state.
-        await prisma.mortalCandidate.updateMany({ where: { id: p.id, delivery: "ready" }, data: { delivery: "expired" } });
         return;
     }
     const settings = await prisma.nanikiruGuildSetting.findUnique({ where: { guildId: MADOROMI_GUILD_ID } });
@@ -287,7 +282,7 @@ async function closeProblem(client: Client, p: MortalCandidate) {
 export async function processMortalQueue(client: Client) {
     if (!client.isReady())
         return;
-    const pending = await prisma.mortalCandidate.findMany({ where: { batchId: { not: null }, issuedAt: null, delivery: { in: ["ready", "sending", "uncertain"] } }, orderBy: { id: "asc" }, take: 100 });
+    const pending = await prisma.mortalCandidate.findMany({ where: { batch: { mode: "request" }, issuedAt: null, delivery: { in: ["ready", "sending", "uncertain"] } }, orderBy: { id: "asc" }, take: 100 });
     for (const p of pending)
         try {
             await deliverMortalCandidate(client, p);
@@ -332,12 +327,12 @@ export async function handleMortalCommand(interaction: ChatInputCommandInteracti
         await interaction.editReply("まどろみの運営・開発者向けのコマンドです。");
         return;
     }
-    const mode = interaction.options.getString("mode", true);
+    const mode = interaction.options.getString("mode");
     let batchId: string | undefined;
     if (mode !== "retry")
-        batchId = await selectMortalManually(interaction.id, mode === "past" ? "past" : "latest");
+        batchId = await selectMortalManually(interaction.id);
     await processMortalQueue(client);
-    const items = await prisma.mortalCandidate.findMany({ where: batchId ? { batchId } : { batchId: { not: null }, issuedAt: null } });
+    const items = await prisma.mortalCandidate.findMany({ where: batchId ? { batchId } : { batch: { mode: "request" }, issuedAt: null } });
     await interaction.editReply(`実戦何切る：${items.filter(p => p.issuedAt).length}問を投稿済み、${items.filter(p => !p.issuedAt).length}問を保持中。${items.some(p => ["sending", "uncertain"].includes(p.delivery)) ? "送信結果が不明な問題は履歴照合まで再送を保留しています。" : ""}${items.length ? "" : "対象候補はありません。"}`);
 }
 export async function handleMortalAnswer(interaction: StringSelectMenuInteraction) {

@@ -24,7 +24,14 @@ export async function registerMortalImport(input: ImportInput, now = new Date())
         }[];
     })[] = [];
     for (const r of input.reviews.filter(r => !existing.has(r.id))) {
-        prepared.push({ ...r, candidates: r.decisions.map(d => ({ id: hashId(`${r.id}:${d.anchor}:${d.entry}`), data: classifyDecision(d) })).filter(c => c.data !== null) });
+        const candidates = [];
+        for (const [index, d] of r.decisions.entries()) {
+            const data = classifyDecision(d);
+            if (data) candidates.push({ id: hashId(`${r.id}:${d.anchor}:${d.entry}`), data });
+            // Keep health checks and Discord interaction acknowledgements responsive on Free CPU.
+            if (index % 8 === 7) await setImmediate();
+        }
+        prepared.push({ ...r, candidates });
         await setImmediate();
     }
     return prisma.$transaction(async (tx) => {

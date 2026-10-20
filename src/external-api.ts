@@ -8,6 +8,7 @@ import { calculateResultsWithRuleSet, normalizeMahjongType } from "./scoring.js"
 import type { HandEndType, HandInput, HandPlayerStatInput, MahjongType, PlayerInput } from "./types.js";
 import { validatePlayers } from "./validation.js";
 import { createMortalPreviewHandler, type MortalPreviewOptions } from "./mortal-preview.js";
+import { createMortalImportHandler } from "./mortal-nanikiru.js";
 
 const maxBodyBytes = 64 * 1024;
 const idPattern = /^\d{17,20}$/;
@@ -620,11 +621,13 @@ async function handleExternalMatch(client: Client, request: IncomingMessage, res
 
 export function createApiServer(client: Client, checkDatabase: DatabaseHealthCheck = checkDatabaseConnection, previewOptions?: MortalPreviewOptions) {
   const handlePreview = createMortalPreviewHandler(previewOptions);
+  const handleMortalImport = createMortalImportHandler();
   return createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://localhost");
 
       if (await handlePreview(request, response, url.pathname)) return;
+      if (await handleMortalImport(request, response, url.pathname)) return;
 
       if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/health/db") {
         try {

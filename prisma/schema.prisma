@@ -7,6 +7,72 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Mortal imports are private application data, independent of regenerated HTML.
+model MortalReview {
+  id         String @id
+  playedAt   DateTime? @map("played_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  candidates MortalCandidate[]
+}
+
+model MortalBatch {
+  id        String @id
+  mode      String
+  createdAt DateTime @default(now()) @map("created_at")
+  items     MortalCandidate[]
+}
+
+model MortalCandidate {
+  id           String @id
+  reviewId     String @map("review_id")
+  gap          Float
+  data         Json
+  ruleVersion  String @map("rule_version")
+  batchId      String? @map("batch_id")
+  // Reservation/delivery state is separate from the two-state issued flag (issuedAt).
+  delivery     String @default("ready")
+  attemptAt    DateTime? @map("attempt_at")
+  channelId    String? @map("channel_id")
+  resultChannelId String? @map("result_channel_id")
+  resultDelivery String @default("ready") @map("result_delivery")
+  resultMessageId String? @map("result_message_id")
+  resultAttemptAt DateTime? @map("result_attempt_at")
+  messageId    String? @unique @map("message_id")
+  issuedAt     DateTime? @map("issued_at")
+  closesAt     DateTime? @map("closes_at")
+  closedAt     DateTime? @map("closed_at")
+  closeSynced  Boolean @default(false) @map("close_synced")
+  createdAt    DateTime @default(now()) @map("created_at")
+  review       MortalReview @relation(fields: [reviewId], references: [id], onDelete: Restrict)
+  batch        MortalBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  answers      MortalAnswer[]
+  feedback     MortalFeedback[]
+  @@index([reviewId])
+  @@index([batchId, issuedAt])
+  @@index([closesAt, closeSynced])
+}
+
+// Append-only: an answer change never destroys the earlier choice.
+model MortalAnswer {
+  interactionId String @id @map("interaction_id")
+  candidateId   String @map("candidate_id")
+  userId        String @map("user_id")
+  tile          String
+  createdAt     DateTime @default(now()) @map("created_at")
+  candidate     MortalCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  @@index([candidateId, userId, createdAt])
+}
+
+model MortalFeedback {
+  interactionId String @id @map("interaction_id")
+  candidateId   String @map("candidate_id")
+  userId        String @map("user_id")
+  kind          String
+  createdAt     DateTime @default(now()) @map("created_at")
+  candidate     MortalCandidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  @@index([candidateId, userId])
+}
+
 model Guild {
   guildId           String                @id @map("guild_id")
   users             User[]

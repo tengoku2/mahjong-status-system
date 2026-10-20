@@ -265,13 +265,14 @@ function parseTileList(input: string): { hand: Tile[]; redDoraTiles: Tile[] } {
   return { hand, redDoraTiles };
 }
 
-export function calculateShanten(hand: Tile[]): number {
-  if (hand.length % 3 !== 1) {
+export function calculateShanten(hand: Tile[], fixedMelds = 0): number {
+  if (!Number.isInteger(fixedMelds) || fixedMelds < 0 || fixedMelds > 4 || hand.length !== 13 - fixedMelds * 3) {
     throw new Error("向聴数は3n+1枚の手牌で計算してください。");
   }
 
   const counts = toCounts(hand);
-  return Math.min(calculateStandardShanten(counts), calculateChiitoiShanten(counts), calculateKokushiShanten(counts));
+  const standard = calculateStandardShanten(counts, fixedMelds);
+  return fixedMelds ? standard : Math.min(standard, calculateChiitoiShanten(counts), calculateKokushiShanten(counts));
 }
 
 function filterToShanten(filter: ShantenFilter): number | null {
@@ -394,13 +395,13 @@ function toCounts(hand: Tile[]): number[] {
   return counts;
 }
 
-function calculateStandardShanten(counts: number[]): number {
-  let minShanten = calculateStandardShantenWithPair(counts, false);
+function calculateStandardShanten(counts: number[], fixedMelds = 0): number {
+  let minShanten = calculateStandardShantenWithPair(counts, false, fixedMelds);
 
   for (let tile = 0; tile < TILE_COUNT; tile += 1) {
     if (counts[tile] >= 2) {
       counts[tile] -= 2;
-      minShanten = Math.min(minShanten, calculateStandardShantenWithPair(counts, true));
+      minShanten = Math.min(minShanten, calculateStandardShantenWithPair(counts, true, fixedMelds));
       counts[tile] += 2;
     }
   }
@@ -408,7 +409,7 @@ function calculateStandardShanten(counts: number[]): number {
   return minShanten;
 }
 
-function calculateStandardShantenWithPair(counts: number[], hasPair: boolean): number {
+function calculateStandardShantenWithPair(counts: number[], hasPair: boolean, fixedMelds = 0): number {
   let minShanten = 8;
 
   function search(start: number, melds: number, taatsu: number) {
@@ -464,7 +465,7 @@ function calculateStandardShantenWithPair(counts: number[], hasPair: boolean): n
     counts[tile] += 1;
   }
 
-  search(0, 0, 0);
+  search(0, fixedMelds, 0);
   return minShanten;
 }
 

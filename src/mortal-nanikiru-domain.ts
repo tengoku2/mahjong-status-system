@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { calculateShanten, tileLabel } from "./nanikiru.js";
+import { calculateShanten, formatNanikiruHand, tileLabel } from "./nanikiru.js";
 export const MORTAL_RULE_VERSION = "shape-1.0.0";
 export const WEEK_MS = 168 * 60 * 60 * 1000;
 export const hashId = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -15,6 +15,9 @@ export function tileNumber(code: string): number {
 export function codeLabel(code: string): string {
     return `${code.endsWith("r") ? "赤" : ""}${tileLabel(tileNumber(code))}`;
 }
+export function formatMortalTiles(codes: string[]): string {
+    return formatNanikiruHand({ hand: codes.map(tileNumber), redDoraTiles: codes.filter(c => c.endsWith("r")).map(tileNumber) });
+}
 export interface DecisionInput {
     anchor: string;
     entry: number;
@@ -29,6 +32,7 @@ export interface DecisionInput {
     }[];
     seat: number;
     startingScores: number[] | null;
+    dora?: string[];
 }
 export interface ReviewInput {
     id: string;
@@ -126,7 +130,12 @@ export function parseImport(value: unknown): ImportInput {
             const startingScores = d.startingScores === null ? null : d.startingScores;
             if (startingScores !== null && (!Array.isArray(startingScores) || startingScores.length !== 4 || !startingScores.every(n => Number.isInteger(n) && Math.abs(n) <= 1000000)))
                 throw new Error("Invalid starting scores.");
-            return { anchor: shortString(d.anchor), entry: integer(d.entry, 1, 1000), round: shortString(d.round, 40), turn: d.turn === null ? null : integer(d.turn, 1, 100), hand, melds, actual, actions, seat: integer(d.seat, 0, 3), startingScores: startingScores as number[] | null };
+            let dora: string[] | undefined;
+            if (d.dora !== undefined) {
+                if (!Array.isArray(d.dora) || d.dora.length < 1 || d.dora.length > 5) throw new Error("Invalid dora.");
+                dora = d.dora.map(t => { const code = shortString(t, 2); tileNumber(code); return code; });
+            }
+            return { anchor: shortString(d.anchor), entry: integer(d.entry, 1, 1000), round: shortString(d.round, 40), turn: d.turn === null ? null : integer(d.turn, 1, 100), hand, melds, actual, actions, seat: integer(d.seat, 0, 3), startingScores: startingScores as number[] | null, ...(dora ? { dora } : {}) };
         });
         if (new Set(decisions.map(d => `${d.anchor}:${d.entry}`)).size !== decisions.length)
             throw new Error("Duplicate decision identity.");

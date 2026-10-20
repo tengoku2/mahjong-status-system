@@ -6,7 +6,7 @@ import type { MortalCandidate } from "@prisma/client";
 const { db } = vi.hoisted(() => ({ db: {} as any }));
 vi.mock("../src/prisma.js", () => ({ prisma: db }));
 import { answerComparison, answerMenu, deliverMortalCandidate, handleMortalAnswer, handleMortalFeedback, problemEmbed, processMortalQueue, registerMortalImport, selectMortalManually } from "../src/mortal-nanikiru.js";
-import { classifyDecision, inWindow, parseImport, shapeCounts, tileNumber, WEEK_MS, type DecisionInput } from "../src/mortal-nanikiru-domain.js";
+import { classifyDecision, formatMortalTiles, inWindow, parseImport, shapeCounts, tileNumber, WEEK_MS, type DecisionInput } from "../src/mortal-nanikiru-domain.js";
 import { MADOROMI_GUILD_ID } from "../src/guild-rules.js";
 const now = new Date("2026-10-20T12:00:00+09:00");
 function decision(gap = 0, entry = 1): DecisionInput {
@@ -76,7 +76,7 @@ beforeEach(() => {
 function discord() {
     const history = new Collection<string, any>();
     const channel: any = { id: "channel", guildId: MADOROMI_GUILD_ID, isSendable: () => true, messages: { fetch: vi.fn(async (q: any) => typeof q === "string" ? history.get(q) : history) }, send: vi.fn(async (options: any) => {
-            const m = { id: `message${history.size + 1}`, author: { id: "bot" }, createdAt: new Date(), createdTimestamp: Date.now(), embeds: options.embeds.map((e: any) => e.toJSON()), edit: vi.fn() };
+            const m = { id: `message${history.size + 1}`, author: { id: "bot" }, createdAt: new Date(), createdTimestamp: Date.now(), embeds: options.embeds.map((e: any) => e.toJSON()), components: (options.components ?? []).map((row: any) => ({components: row.toJSON().components.map((c:any)=>({customId:c.custom_id}))})), edit: vi.fn() };
             history.set(m.id, m);
             return m;
         }) };
@@ -90,6 +90,11 @@ async function reserved() {
     return [...candidates.values()][0] as MortalCandidate;
 }
 describe("Mortal candidate rules", () => {
+    it("groups suits and melds using the existing red-five notation", () => {
+        expect(formatMortalTiles(["4m", "4m", "5p", "6p", "6p", "9p"])).toBe("44m 5669p");
+        expect(formatMortalTiles(["7m", "5mr", "6m"])).toBe("5(赤)67m");
+        expect(formatMortalTiles(["p", "p", "p"])).toBe("白白白");
+    });
     it("includes zero and tiny gaps and early turns when there is a shape branch", () => {
         expect(classifyDecision(decision())?.gap).toBe(0);
         expect(classifyDecision(decision(.00001))?.gap).toBe(.00001);
@@ -174,6 +179,20 @@ describe("Mortal Discord delivery and privacy", () => {
         expect(options[0].value).toBe("3m");
         expect(options.every(o => !o.description)).toBe(true);
         expect(answerMenu({ ...p, data: { ...(p.data as any), metrics: [...(p.data as any).metrics].reverse() } }).toJSON().components[0].options.map(o => o.value)).toEqual(options.map(o => o.value));
+    });
+    it("shows grouped hand, grouped melds and dora without explanatory text or IDs", async () => {
+        const p = await reserved();
+        (p.data as any).dora=["1m","c"];
+        const embed=problemEmbed(p).toJSON();
+        expect(embed.description).toContain("手牌：344m 567p 34" );
+        expect(embed.description).toContain("副露・槓：567m");
+        expect(embed.description).toContain("ドラ：1m 中");
+        expect(embed.description).toContain("北家");
+        expect(embed.description).not.toContain("自席");
+        expect(embed.description).not.toContain("省略");
+        expect(embed.description).not.toContain("牌を選ぶと");
+        expect(embed.description).not.toContain("mjs-mortal");
+        expect(embed.footer).toBeUndefined();
     });
     it("does not issue a failed post; a definitive rejection can be retried", async () => {
         const p = await reserved(), { client, channel } = discord();

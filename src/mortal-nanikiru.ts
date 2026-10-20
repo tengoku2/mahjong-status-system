@@ -5,7 +5,7 @@ import { Prisma, type MortalCandidate } from "@prisma/client";
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, MessageFlags, StringSelectMenuBuilder, type ChatInputCommandInteraction, type Client, type Message, type SendableChannels, type StringSelectMenuInteraction, type ButtonInteraction } from "discord.js";
 import { MADOROMI_GUILD_ID } from "./guild-rules.js";
 import { prisma } from "./prisma.js";
-import { classifyDecision, codeLabel, hashId, inWindow, MORTAL_RULE_VERSION, parseImport, rankCandidates, tileNumber, type ImportInput, type ProblemData } from "./mortal-nanikiru-domain.js";
+import { classifyDecision, codeLabel, formatMortalTiles, hashId, inWindow, MORTAL_RULE_VERSION, parseImport, rankCandidates, tileNumber, type ImportInput, type ProblemData } from "./mortal-nanikiru-domain.js";
 const LOCK = "mjs:mortal-nanikiru:primary";
 const marker = (id: string) => `mjs-mortal:${id}`;
 const asData = (p: MortalCandidate) => p.data as unknown as ProblemData;
@@ -83,15 +83,15 @@ export async function selectMortalManually(requestId: string, mode: "latest" | "
 export function problemEmbed(p: MortalCandidate, closed = false, distribution?: string) {
     const d = asData(p);
     const description = [
-        `${d.round} / ${d.turn === null ? "巡目不明" : `${d.turn}巡目`}${/[東南西北]([1-4])局/.test(d.round) ? ` / 自席 ${["東家", "南家", "西家", "北家"][(d.seat - Number(/[東南西北]([1-4])局/.exec(d.round)![1]) + 5) % 4]}` : ""}`,
-        `手牌：${d.hand.map(codeLabel).join(" ")}`,
-        d.melds.length ? `副露・槓：${d.melds.map(m => m.map(codeLabel).join(" ")).join(" / ")}` : "門前",
+        `${d.round} / ${d.turn === null ? "巡目不明" : `${d.turn}巡目`}${/[東南西北]([1-4])局/.test(d.round) ? ` / ${["東家", "南家", "西家", "北家"][(d.seat - Number(/[東南西北]([1-4])局/.exec(d.round)![1]) + 5) % 4]}` : ""}`,
+        `手牌：${formatMortalTiles(d.hand)}`,
+        d.melds.length ? `副露・槓：${d.melds.map(formatMortalTiles).join(" / ")}` : "門前",
+        d.dora?.length ? `ドラ：${formatMortalTiles(d.dora)}` : "",
         d.startingScores ? `局開始時の点数（起家から）：${d.startingScores.join(" / ")}` : "",
-        "ドラ・河・他家の副露は省略した復習問題です。",
-        closed ? "回答受付を締め切りました。" : "牌を選ぶと、Mortalの最大Q値の打牌と実戦の打牌を本人だけに表示します。回答は24時間以内に変更できます。",
+        closed ? "回答受付を締め切りました。" : "",
         distribution ?? ""
     ].filter(Boolean).join("\n");
-    return new EmbedBuilder().setTitle("実戦からの何切る").setDescription(description).setFooter({ text: marker(p.id) });
+    return new EmbedBuilder().setTitle("実戦からの何切る").setDescription(description);
 }
 export function answerMenu(p: MortalCandidate) {
     return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(new StringSelectMenuBuilder()
@@ -130,13 +130,17 @@ async function reconcile(client: Client, p: MortalCandidate) {
     if (message)
         await markIssued(p, message);
 }
-async function findSentMessage(client: Client, channelId: string, attemptAt: Date, expectedMarker: string): Promise<Message | null> {
+async function findSentMessage(client: Client, channelId: string, attemptAt: Date, expectedMarker: string, resultLink?: string): Promise<Message | null> {
     const channel = await channelFor(client, channelId);
     let before: string | undefined;
     for (let page = 0; page < 100; page++) {
         const messages = await channel.messages.fetch({ limit: 100, before });
         for (const message of messages.values())
-            if (message.author.id === client.user?.id && message.embeds.some(e => e.footer?.text === expectedMarker))
+            if (message.author.id === client.user?.id && (
+                message.embeds.some(e => e.footer?.text === expectedMarker) ||
+                (resultLink ? message.embeds.some(e => e.title === "実戦何切る：回答結果" && e.description?.includes(`(${resultLink})`)) :
+                    message.components?.some(row => "components" in row && row.components.some(c => "customId" in c && c.customId === `mjs:mortal:a:${expectedMarker.slice("mjs-mortal:".length)}`)))
+            ))
                 return message;
         const oldest = messages.last();
         if (!oldest || oldest.createdTimestamp < attemptAt.getTime() - 60000 || messages.size < 100)
@@ -203,8 +207,9 @@ async function closeProblem(client: Client, p: MortalCandidate) {
         await message.edit({ embeds: [problemEmbed(p, true, distribution)], components: [] });
     if (p.resultChannelId && p.resultChannelId !== p.channelId && !p.resultMessageId) {
         const resultMarker = `${marker(p.id)}:result`;
+        const resultLink = `https://discord.com/channels/${MADOROMI_GUILD_ID}/${p.channelId}/${p.messageId}`;
         if (p.resultDelivery !== "ready") {
-            const found = p.resultAttemptAt ? await findSentMessage(client, p.resultChannelId, p.resultAttemptAt, resultMarker) : null;
+            const found = p.resultAttemptAt ? await findSentMessage(client, p.resultChannelId, p.resultAttemptAt, resultMarker, resultLink) : null;
             if (!found)
                 return;
             await prisma.mortalCandidate.update({ where: { id: p.id }, data: { resultDelivery: "confirmed", resultMessageId: found.id } });
@@ -216,7 +221,7 @@ async function closeProblem(client: Client, p: MortalCandidate) {
                 return;
             let result: Message;
             try {
-                result = await resultChannel.send({ embeds: [new EmbedBuilder().setTitle("実戦何切る：回答結果").setDescription(`${distribution}\n[問題を見る](https://discord.com/channels/${MADOROMI_GUILD_ID}/${p.channelId}/${p.messageId})`).setFooter({ text: resultMarker })], allowedMentions: { parse: [] }, nonce: hashId(resultMarker).slice(0, 25), enforceNonce: true });
+                result = await resultChannel.send({ embeds: [new EmbedBuilder().setTitle("実戦何切る：回答結果").setDescription(`${distribution}\n[問題を見る](${resultLink})`)], allowedMentions: { parse: [] }, nonce: hashId(resultMarker).slice(0, 25), enforceNonce: true });
             }
             catch (error) {
                 const status = typeof error === "object" && error !== null && "status" in error ? Number(error.status) : 0;

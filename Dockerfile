@@ -1,4 +1,4 @@
-FROM node:22-slim AS base
+FROM node:22.23.4-slim AS base
 WORKDIR /app
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
